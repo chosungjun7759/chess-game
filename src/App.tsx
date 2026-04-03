@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';
 type PieceColor = 'white' | 'black';
@@ -95,6 +95,9 @@ export default function App() {
   }, []);
 
   const toggleBGM = () => {
+    // 구구단송 버튼을 누를 때, '팡!' 소리 스피커도 같이 전원을 켜줍니다! (아이패드 필수 보안 통과 로직)
+    captureSoundRef.current?.load();
+
     if (!playerRef.current) return;
     if (isPlaying) {
       playerRef.current.pauseVideo();
@@ -282,19 +285,31 @@ export default function App() {
               onClick={() => handleSquareClick(index)}
               className={`square ${isDark ? 'dark-square' : 'light-square'} ${isValidMove ? 'valid-move' : ''}`}
             >
-              {piece && (
-                <motion.div
-                  layoutId={`piece-${piece.type}-${piece.color}-${index}`}
-                  className={`piece ${isSelected ? 'selected' : ''}`}
-                  initial={false}
-                  animate={{
-                    transform: `translate(0, 0)`,
-                  }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                >
-                  {piece.emoji}
-                </motion.div>
-              )}
+              <AnimatePresence>
+                {piece && (
+                  <motion.div
+                    key={`${piece.type}-${piece.color}-${index}`}
+                    layoutId={`piece-${piece.type}-${piece.color}-${index}`}
+                    className={`piece ${isSelected ? 'selected' : ''}`}
+                    initial={{ scale: 0, rotate: -180, opacity: 0 }}
+                    animate={{
+                      scale: isSelected ? 1.15 : 1,
+                      rotate: 0,
+                      opacity: 1,
+                      transform: `translate(0, 0)`,
+                    }}
+                    exit={{ scale: 0, rotate: 360, opacity: 0 }}
+                    transition={{ 
+                      type: 'spring', 
+                      stiffness: 300, 
+                      damping: 30,
+                      opacity: { duration: 0.2 }
+                    }}
+                  >
+                    {piece.emoji}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}

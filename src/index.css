@@ -88,7 +88,9 @@ body {
 }
 
 .piece.selected {
-  background-color: rgba(255, 255, 255, 0.4);
+  background-color: rgba(255, 235, 59, 0.6); /* 밝은 노란색 배경 */
+  box-shadow: 0 0 2vmin 1vmin rgba(255, 235, 59, 0.8); /* 뿜어져 나오는 빛 */
+  z-index: 20; /* 다른 말들보다 제일 위로 올라오게 합니다 */
 }
 
 .valid-move::before {
@@ -96,7 +98,8 @@ body {
   position: absolute;
   width: 40%;
   height: 40%;
-  background-color: rgba(76, 175, 80, 0.7); 
+  background-color: rgba(76, 175, 80, 0.85); 
+  border: 0.3vmin solid white; /* 까만 말 위에서도 잘 보이게 하얀 테두리 추가 */
   border-radius: 50%;
-  z-index: 5; 
+  z-index: 15; /* 기물(10층)보다 더 높은 15층으로 변경! 절대 안 가려집니다. */
 }
