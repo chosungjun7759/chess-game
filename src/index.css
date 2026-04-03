@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme {
+  --font-comic: "Comic Sans MS", cursive, sans-serif;
+  --color-lego-red: #d32f2f;
+  --color-lego-blue: #1976d2;
+  --color-lego-yellow: #fbc02d;
+}
+
+:root {
+  --lego-red: #d32f2f;
+  --lego-board-dark: #1976d2;
+  --lego-board-light: #fbc02d;
+  --lego-stud-color: rgba(255, 255, 255, 0.3);
+  --board-size: 90vmin; 
+  --square-size: calc(var(--board-size) / 8);
+}
+
+body {
+  background-color: #f0f8ff;
+  margin: 0;
+  overflow: hidden; 
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-family: "Comic Sans MS", cursive, sans-serif;
+}
+
+.lego-board {
+  display: grid;
+  grid-template-columns: repeat(8, var(--square-size));
+  grid-template-rows: repeat(8, var(--square-size));
+  border: 1.5vmin solid var(--lego-red); 
+  border-radius: 2vmin;
+  box-shadow: 0.5vmin 0.5vmin 2vmin rgba(0,0,0,0.3);
+  position: relative; 
+  overflow: hidden; 
+}
+
+.square {
+  width: var(--square-size);
+  height: var(--square-size);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent; 
+}
+
+.square::after {
+  content: '';
+  position: absolute;
+  width: 25%; 
+  height: 25%;
+  background-color: var(--lego-stud-color);
+  border-radius: 50%;
+  top: 10%;
+  left: 10%;
+  box-shadow: 200% 0 0 var(--lego-stud-color),
+              400% 0 0 var(--lego-stud-color),
+              0 200% 0 var(--lego-stud-color),
+              200% 200% 0 var(--lego-stud-color),
+              400% 200% 0 var(--lego-stud-color),
+              0 400% 0 var(--lego-stud-color),
+              200% 400% 0 var(--lego-stud-color),
+              400% 400% 0 var(--lego-stud-color);
+}
+
+.dark-square { background-color: var(--lego-board-dark); }
+.light-square { background-color: var(--lego-board-light); }
+
+.piece {
+  font-size: calc(var(--square-size) * 0.85);
+  position: absolute; 
+  transition: transform 0.3s ease-in-out, background-color 0.2s;
+  z-index: 10; 
+  width: var(--square-size);
+  height: var(--square-size);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%; 
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.piece.selected {
+  background-color: rgba(255, 255, 255, 0.4);
+}
+
+.valid-move::before {
+  content: '';
+  position: absolute;
+  width: 40%;
+  height: 40%;
+  background-color: rgba(76, 175, 80, 0.7); 
+  border-radius: 50%;
+  z-index: 5; 
+}
