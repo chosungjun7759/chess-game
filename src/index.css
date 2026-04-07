@@ -7,6 +7,11 @@
   --color-lego-yellow: #fbc02d;
 }
 
+/* 🎨 [폰트 업그레이드] 아이들이 좋아하는 귀엽고 부드러운 글씨체 요정 출동! */
+* {
+  font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Round', 'Noto Sans KR', sans-serif;
+}
+
 :root {
   --lego-red: #d32f2f;
   --lego-board-dark: #1976d2;
@@ -24,7 +29,47 @@ body {
   justify-content: center;
   align-items: center;
   height: 100vh;
-  font-family: "Comic Sans MS", cursive, sans-serif;
+}
+
+.game-title {
+  color: var(--lego-red);
+  font-size: 5.5vmin; /* 조금 더 크게 강조 */
+  margin: 0 0 1vh 0;
+  font-weight: 900;
+  letter-spacing: -0.1vmin; /* 글자 사이를 좁혀 귀엽게 */
+  text-shadow: 0.3vmin 0.3vmin 0 white; /* 글자 주변에 흰색 테두리 */
+}
+
+.music-controls {
+  display: flex;
+  gap: 1.5vmin;
+  align-items: center;
+  margin-bottom: 1.5vh;
+}
+
+.bgm-select {
+  padding: 1vmin 2vmin;
+  font-size: 2.5vmin;
+  font-family: inherit;
+  border-radius: 2vmin;
+  border: 0.4vmin solid var(--lego-red);
+  color: #333;
+  font-weight: bold;
+  outline: none;
+  background-color: white;
+  cursor: pointer;
+}
+
+.bgm-btn {
+  padding: 1.2vmin 3vmin;
+  font-size: 2.5vmin;
+  background-color: var(--lego-red);
+  color: white;
+  border: none;
+  border-radius: 2vmin;
+  box-shadow: 0.3vmin 0.3vmin 1vmin rgba(0,0,0,0.2);
+  cursor: pointer;
+  font-weight: bold;
 }
 
 .lego-board {
@@ -103,3 +148,50 @@ body {
   border-radius: 50%;
   z-index: 15; /* 기물(10층)보다 더 높은 15층으로 변경! 절대 안 가려집니다. */
 }
+
+.tutorial-box {
+  margin-top: 1.5vh;
+  padding: 1.5vmin 2vmin;
+  background-color: #fffde7;
+  border: 0.5vmin dashed #fbc02d;
+  border-radius: 2vmin;
+  font-size: 2.8vmin;
+  text-align: center;
+  width: 90%;
+  min-height: 5vh;
+  box-shadow: 0.5vmin 0.5vmin 1vmin rgba(0,0,0,0.1);
+  color: #333;
+  font-weight: 500;
+}
+
+/* 🟢 [기능 추가를 위한 신규 CSS] 메뉴판 화면 */
+.menu-overlay {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background-color: rgba(255, 255, 255, 0.9);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  border-radius: 2vmin;
+}
+
+.menu-title { font-size: 5vmin; color: #1976d2; margin-bottom: 3.5vh; font-weight: bold; letter-spacing: -0.1vmin; }
+
+.menu-btn {
+  width: 70%; padding: 2.2vh; margin-bottom: 1.8vh;
+  font-size: 3.2vmin; font-weight: bold; font-family: inherit;
+  background-color: #fbc02d; color: #333;
+  border: 0.5vmin solid #f57f17; border-radius: 2.5vmin;
+  cursor: pointer; box-shadow: 0 0.5vmin 1vmin rgba(0,0,0,0.2);
+}
+.menu-btn:active { transform: scale(0.95); }
+
+.diff-container { display: flex; flex-direction: column; width: 70%; }
+.diff-btn {
+  padding: 1.8vh; margin-bottom: 1.2vh; font-size: 2.8vmin; font-family: inherit;
+  background-color: #4CAF50; color: white; border: none; border-radius: 2vmin;
+  cursor: pointer; font-weight: bold;
+}
+.diff-btn:active { transform: scale(0.95); }
