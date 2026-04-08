@@ -51,23 +51,50 @@ export default function App() {
   const [boardState, setBoardState] = useState<(PieceData | null)[]>(Array(64).fill(null));
   const [selectedSquareIndex, setSelectedSquareIndex] = useState<number | null>(null);
   const [validMoves, setValidMoves] = useState<number[]>([]);
+  const [captureMoves, setCaptureMoves] = useState<number[]>([]);
   const [status, setStatus] = useState<string>("모드를 선택해 주세요!");
   const [tutorialText, setTutorialText] = useState<string>("모드를 선택해 주세요!");
   const [isPlaying, setIsPlaying] = useState(false);
   const [gameOver, setGameOver] = useState(false);
+  const [promotionData, setPromotionData] = useState<{ from: number; to: number; color: PieceColor } | null>(null);
+  const [capturedIndex, setCapturedIndex] = useState<number | null>(null);
   
   const [currentMode, setCurrentMode] = useState<'tutorial' | 'match' | null>(null);
-  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard' | null>(null);
+  const [difficulty, setDifficulty] = useState<'level1' | 'level2' | 'level3' | 'level4' | 'level5' | null>(null);
   const [turn, setTurn] = useState<PieceColor>('white');
   const [showMenu, setShowMenu] = useState(true);
   const [showDifficulty, setShowDifficulty] = useState(false);
   
   const [currentVideoId, setCurrentVideoId] = useState('iQIkgz9P-nM');
   
+  const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
   const captureSoundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    const fitBoard = () => {
+      if (!containerRef.current) return;
+      const root = document.documentElement;
+      const title = containerRef.current.querySelector('.game-title') as HTMLElement;
+      const controls = containerRef.current.querySelector('.music-controls') as HTMLElement;
+      const tutBox = containerRef.current.querySelector('.tutorial-box') as HTMLElement;
+      const statusText = containerRef.current.querySelector('.game-status') as HTMLElement;
+
+      const uiHeight = (title?.offsetHeight || 0) + 
+                       (controls?.offsetHeight || 0) + 
+                       (tutBox?.offsetHeight || 0) + 
+                       (statusText?.offsetHeight || 0) + 60; 
+      
+      const availableHeight = window.innerHeight - uiHeight;
+      const availableWidth = window.innerWidth * 0.95;
+
+      const size = Math.floor(Math.min(availableWidth, availableHeight));
+      root.style.setProperty('--board-size', `${size}px`);
+    };
+
+    window.addEventListener('resize', fitBoard);
+    fitBoard();
+
     // Load YouTube API
     const tag = document.createElement('script');
     tag.src = "https://www.youtube.com/iframe_api";
@@ -90,6 +117,8 @@ export default function App() {
 
     // Initialize capture sound
     captureSoundRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/3005/3005-preview.mp3');
+
+    return () => window.removeEventListener('resize', fitBoard);
   }, []);
 
   const handleMusicChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -117,9 +146,24 @@ export default function App() {
 
   const calculateValidMoves = useCallback((index: number, type: PieceType, color: PieceColor, currentBoard: (PieceData | null)[]) => {
     const moves: number[] = [];
+    const caps: number[] = [];
     const row = Math.floor(index / 8);
     const col = index % 8;
     const isValid = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
+
+    const register = (nr: number, nc: number) => {
+      if (!isValid(nr, nc)) return false;
+      const targetIndex = nr * 8 + nc;
+      const pieceAtNext = currentBoard[targetIndex];
+      if (!pieceAtNext) {
+        moves.push(targetIndex);
+        return true;
+      }
+      if (pieceAtNext.color !== color) {
+        caps.push(targetIndex);
+      }
+      return false;
+    };
 
     if (type === 'rook' || type === 'bishop' || type === 'queen') {
       const directions: [number, number][] = [];
@@ -128,71 +172,48 @@ export default function App() {
 
       directions.forEach(([dr, dc]) => {
         for (let i = 1; i < 8; i++) {
-          const nextRow = row + dr * i;
-          const nextCol = col + dc * i;
-          if (!isValid(nextRow, nextCol)) break;
-
-          const nextIndex = nextRow * 8 + nextCol;
-          const pieceAtNext = currentBoard[nextIndex];
-
-          if (!pieceAtNext) {
-            moves.push(nextIndex);
-          } else {
-            if (pieceAtNext.color !== color) {
-              moves.push(nextIndex);
-            }
-            break;
-          }
+          if (!register(row + dr * i, col + dc * i)) break;
         }
       });
     }
 
     if (type === 'knight') {
       const jumps: [number, number][] = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
-      jumps.forEach(([dr, dc]) => {
-        const nextRow = row + dr;
-        const nextCol = col + dc;
-        if (isValid(nextRow, nextCol)) {
-          const nextIndex = nextRow * 8 + nextCol;
-          const pieceAtNext = currentBoard[nextIndex];
-          if (!pieceAtNext || pieceAtNext.color !== color) moves.push(nextIndex);
-        }
-      });
+      jumps.forEach(([dr, dc]) => register(row + dr, col + dc));
     }
 
     if (type === 'king') {
       for (let dr = -1; dr <= 1; dr++) {
         for (let dc = -1; dc <= 1; dc++) {
           if (dr === 0 && dc === 0) continue;
-          const nextRow = row + dr;
-          const nextCol = col + dc;
-          if (isValid(nextRow, nextCol)) {
-            const nextIndex = nextRow * 8 + nextCol;
-            const pieceAtNext = currentBoard[nextIndex];
-            if (!pieceAtNext || pieceAtNext.color !== color) moves.push(nextIndex);
-          }
+          register(row + dr, col + dc);
         }
       }
     }
 
     if (type === 'pawn') {
       const dir = color === 'white' ? -1 : 1;
-      const isValidPawnForward = (r: number, c: number) => isValid(r, c) && !currentBoard[r * 8 + c];
-
-      if (isValidPawnForward(row + dir, col)) {
-        const forwardIndex = (row + dir) * 8 + col;
-        moves.push(forwardIndex);
-
-        if ((color === 'white' && row === 6) || (color === 'black' && row === 1)) {
-          if (isValidPawnForward(row + dir * 2, col)) moves.push((row + dir * 2) * 8 + col);
+      const startRow = color === 'white' ? 6 : 1;
+      
+      if (isValid(row + dir, col) && !currentBoard[(row + dir) * 8 + col]) {
+        moves.push((row + dir) * 8 + col);
+        if (row === startRow && !currentBoard[(row + dir * 2) * 8 + col]) {
+          moves.push((row + dir * 2) * 8 + col);
         }
       }
 
-      const isValidPawnCapture = (r: number, c: number) => isValid(r, c) && currentBoard[r * 8 + c] && currentBoard[r * 8 + c]?.color !== color;
-      if (isValidPawnCapture(row + dir, col - 1)) moves.push((row + dir) * 8 + col - 1);
-      if (isValidPawnCapture(row + dir, col + 1)) moves.push((row + dir) * 8 + col + 1);
+      [-1, 1].forEach(dc => {
+        const nr = row + dir;
+        const nc = col + dc;
+        if (isValid(nr, nc)) {
+          const target = currentBoard[nr * 8 + nc];
+          if (target && target.color !== color) {
+            caps.push(nr * 8 + nc);
+          }
+        }
+      });
     }
-    return moves;
+    return { moves, caps };
   }, []);
 
   const resetGame = () => {
@@ -203,6 +224,9 @@ export default function App() {
     setBoardState(Array(64).fill(null));
     setSelectedSquareIndex(null);
     setValidMoves([]);
+    setCaptureMoves([]);
+    setPromotionData(null);
+    setCapturedIndex(null);
     setStatus("모드를 선택해 주세요!");
     setTutorialText("모드를 선택해 주세요!");
     setGameOver(false);
@@ -218,7 +242,7 @@ export default function App() {
     setStatus("말을 터치해서 움직여보세요!");
   };
 
-  const startMatch = (diff: 'easy' | 'medium' | 'hard') => {
+  const startMatch = (diff: 'level1' | 'level2' | 'level3' | 'level4' | 'level5') => {
     setCurrentMode('match');
     setDifficulty(diff);
     setShowMenu(false);
@@ -231,14 +255,17 @@ export default function App() {
   const computerMove = useCallback((currentBoard: (PieceData | null)[]) => {
     const PIECE_VALUE: Record<string, number> = { pawn: 1, knight: 3, bishop: 3, rook: 5, queen: 9, king: 0 };
 
-    let allPossibleMoves: { from: number; to: number; captureValue: number }[] = [];
+    let allPossibleMoves: { from: number; to: number; captureValue: number; isCapture: boolean }[] = [];
     for (let i = 0; i < 64; i++) {
       if (currentBoard[i] && currentBoard[i]?.color === 'black') {
-        const moves = calculateValidMoves(i, currentBoard[i]!.type, 'black', currentBoard);
+        const { moves, caps } = calculateValidMoves(i, currentBoard[i]!.type, 'black', currentBoard);
         moves.forEach(toIdx => {
+          allPossibleMoves.push({ from: i, to: toIdx, captureValue: 0, isCapture: false });
+        });
+        caps.forEach(toIdx => {
           const targetPiece = currentBoard[toIdx];
           const captureValue = targetPiece ? PIECE_VALUE[targetPiece.type] || 0 : 0;
-          allPossibleMoves.push({ from: i, to: toIdx, captureValue });
+          allPossibleMoves.push({ from: i, to: toIdx, captureValue, isCapture: true });
         });
       }
     }
@@ -248,34 +275,64 @@ export default function App() {
       return;
     }
 
-    let chosenMove: { from: number; to: number } | null = null;
+    let chosenMove: { from: number; to: number; isCapture: boolean } | null = null;
 
-    if (difficulty === 'easy') {
+    if (difficulty === 'level1') {
+      // 1단계: 완전 랜덤
       chosenMove = allPossibleMoves[Math.floor(Math.random() * allPossibleMoves.length)];
-    } else if (difficulty === 'medium') {
-      let captureMoves = allPossibleMoves.filter(m => m.captureValue > 0);
-      if (captureMoves.length > 0) {
-        chosenMove = captureMoves[Math.floor(Math.random() * captureMoves.length)];
+    } else if (difficulty === 'level2') {
+      // 2단계: 가끔 먹기 (50% 확률)
+      const captures = allPossibleMoves.filter(m => m.isCapture);
+      if (captures.length > 0 && Math.random() > 0.5) {
+        chosenMove = captures[Math.floor(Math.random() * captures.length)];
       } else {
         chosenMove = allPossibleMoves[Math.floor(Math.random() * allPossibleMoves.length)];
       }
-    } else if (difficulty === 'hard') {
+    } else if (difficulty === 'level3') {
+      // 3단계: 무조건 제일 비싼 거 먹기
       const maxValue = Math.max(...allPossibleMoves.map(m => m.captureValue));
-      if (maxValue > 0) {
-        const bestCaptures = allPossibleMoves.filter(m => m.captureValue === maxValue);
-        chosenMove = bestCaptures[Math.floor(Math.random() * bestCaptures.length)];
-      } else {
-        // 먹을 것 없으면 중앙 선호
-        const centerBonusMoves = allPossibleMoves.map(m => {
-          const r = Math.floor(m.to / 8);
-          const c = m.to % 8;
-          const dist = Math.abs(r - 3.5) + Math.abs(c - 3.5);
-          return { ...m, bonus: 7 - dist };
-        });
-        centerBonusMoves.sort((a, b) => b.bonus - a.bonus);
-        const topMoves = centerBonusMoves.slice(0, 3);
-        chosenMove = topMoves[Math.floor(Math.random() * topMoves.length)];
-      }
+      const bestCaptures = allPossibleMoves.filter(m => m.captureValue === maxValue);
+      chosenMove = bestCaptures[Math.floor(Math.random() * bestCaptures.length)];
+    } else if (difficulty === 'level4') {
+      // 4단계: 먹기 + 중앙 차지하기
+      const scoredMoves = allPossibleMoves.map(m => {
+        const r = Math.floor(m.to / 8);
+        const c = m.to % 8;
+        const centerBonus = 7 - (Math.abs(r - 3.5) + Math.abs(c - 3.5));
+        return { ...m, score: (m.captureValue * 10) + centerBonus };
+      });
+      const maxScore = Math.max(...scoredMoves.map(m => m.score));
+      const best = scoredMoves.filter(m => m.score === maxScore);
+      chosenMove = best[Math.floor(Math.random() * best.length)];
+    } else if (difficulty === 'level5') {
+      // 5단계: 예언자 (죽을 자리 피하기 + 먹기 + 중앙)
+      const scoredMoves = allPossibleMoves.map(m => {
+        const r = Math.floor(m.to / 8);
+        const c = m.to % 8;
+        const centerBonus = 7 - (Math.abs(r - 3.5) + Math.abs(c - 3.5));
+        let score = (m.captureValue * 10) + centerBonus;
+
+        // 가상 보드에서 시뮬레이션 (원본 boardState 절대 변경 안 함)
+        const sim = [...currentBoard];
+        sim[m.to] = sim[m.from];
+        sim[m.from] = null;
+
+        for (let j = 0; j < 64; j++) {
+          if (sim[j] && sim[j]?.color === 'white') {
+            const { moves: wm, caps: wc } = calculateValidMoves(j, sim[j]!.type, 'white', sim);
+            if ([...wm, ...wc].includes(m.to)) {
+              score -= 50;
+              break;
+            }
+          }
+        }
+
+        return { ...m, score };
+      });
+
+      const maxScore = Math.max(...scoredMoves.map(m => m.score));
+      const best = scoredMoves.filter(m => m.score === maxScore);
+      chosenMove = best[Math.floor(Math.random() * best.length)];
     }
 
     if (chosenMove) {
@@ -288,10 +345,15 @@ export default function App() {
           const newBoard = [...currentBoard];
           const capturedPiece = newBoard[to];
           
+          if (capturedPiece) {
+            setCapturedIndex(to);
+            captureSoundRef.current?.play();
+          }
+
           newBoard[to] = movingPiece;
           newBoard[from] = null;
 
-          // 폰 승진 로직
+          // 폰 승진 로직 (컴퓨터는 항상 퀸)
           if (movingPiece.type === 'pawn' && (to < 8 || to >= 56)) {
             newBoard[to] = {
               ...movingPiece,
@@ -299,33 +361,34 @@ export default function App() {
               emoji: movingPiece.color === 'white' ? '♕' : '♛',
               desc: "내가 바로 '여왕'! 어디든 갈 수 있어!"
             };
-            captureSoundRef.current?.play(); // 승진 소리
           }
 
           setBoardState(newBoard);
           
-          if (capturedPiece) {
-            captureSoundRef.current?.play();
-            setStatus(`얍! 적군 ${capturedPiece.emoji}을(를) 물리쳤어요!`);
-            if (capturedPiece.type === 'king') {
-              setGameOver(true);
-              const winner = movingPiece.color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
-              setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
-              setTutorialText(`체크메이트! ${winner}이 이겼습니다!`);
-              return;
+          setTimeout(() => {
+            setCapturedIndex(null);
+            if (capturedPiece) {
+              setStatus(`얍! 적군 ${capturedPiece.emoji}을(를) 물리쳤어요!`);
+              if (capturedPiece.type === 'king') {
+                setGameOver(true);
+                const winner = movingPiece.color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
+                setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
+                setTutorialText(`체크메이트! ${winner}이 이겼습니다!`);
+                return;
+              }
+            } else {
+              setStatus(`스르륵~ 이동 완료!`);
             }
-          } else {
-            setStatus(`스르륵~ 이동 완료!`);
-          }
-          setTurn('white');
-          setTutorialText("아들 차례입니다! 멋지게 공격해봐요!");
+            setTurn('white');
+            setTutorialText("아들 차례입니다! 멋지게 공격해봐요!");
+          }, 300);
         }
       }, 800);
     }
   }, [difficulty, calculateValidMoves]);
 
   const handleSquareClick = (index: number) => {
-    if (gameOver || showMenu) return;
+    if (gameOver || showMenu || promotionData) return;
     if (currentMode === 'match' && turn !== 'white') return;
 
     const clickedPiece = boardState[index];
@@ -334,62 +397,69 @@ export default function App() {
       if (index === selectedSquareIndex) {
         setSelectedSquareIndex(null);
         setValidMoves([]);
+        setCaptureMoves([]);
         setStatus("선택 취소");
         setTutorialText("다른 체스 친구를 선택해 보세요!");
       } else if (clickedPiece && clickedPiece.color === boardState[selectedSquareIndex]?.color) {
-        // 같은 편 다른 말을 클릭하면 그 말로 재선택
         setSelectedSquareIndex(index);
         setTutorialText(currentMode === 'tutorial' ? clickedPiece.desc : "어디로 이동할까요?");
         setStatus(`어디로 갈까요? 초록색 길을 터치하세요!`);
-        const moves = calculateValidMoves(index, clickedPiece.type, clickedPiece.color, boardState);
+        const { moves, caps } = calculateValidMoves(index, clickedPiece.type, clickedPiece.color, boardState);
         setValidMoves(moves);
-      } else if (validMoves.includes(index)) {
-        const movingPiece = boardState[selectedSquareIndex];
+        setCaptureMoves(caps);
+      } else if (validMoves.includes(index) || captureMoves.includes(index)) {
+        const from = selectedSquareIndex;
+        const to = index;
+        const movingPiece = boardState[from];
+        
         if (movingPiece) {
-          const newBoard = [...boardState];
-          const capturedPiece = newBoard[index];
+          const capturedPiece = boardState[to];
           
-          newBoard[index] = movingPiece;
-          newBoard[selectedSquareIndex] = null;
-
-          // 폰 승진 로직
-          if (movingPiece.type === 'pawn' && (index < 8 || index >= 56)) {
-            newBoard[index] = {
-              ...movingPiece,
-              type: 'queen',
-              emoji: movingPiece.color === 'white' ? '♕' : '♛',
-              desc: "내가 바로 '여왕'! 어디든 갈 수 있어!"
-            };
-            captureSoundRef.current?.play(); // 승진 소리
-          }
-
-          setBoardState(newBoard);
-          
-          if (capturedPiece) {
-            captureSoundRef.current?.play();
-            setStatus(`얍! ${capturedPiece.emoji}를 물리쳤어요!`);
-            
-            if (capturedPiece.type === 'king' && currentMode === 'match') {
-              setGameOver(true);
-              const winner = movingPiece.color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
-              setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
-              setTutorialText(`체크메이트! ${winner}이 이겼습니다!`);
-              return;
+          const finalizeMove = (promotedPiece?: PieceData) => {
+            const newBoard = [...boardState];
+            if (capturedPiece) {
+              setCapturedIndex(to);
+              captureSoundRef.current?.play();
             }
-          } else {
-            setStatus(`스르륵~ 이동 완료!`);
-          }
+            
+            newBoard[to] = promotedPiece || movingPiece;
+            newBoard[from] = null;
+            setBoardState(newBoard);
 
-          if (currentMode === 'match') {
-            setTurn('black');
-            setTutorialText("컴퓨터 로봇이 생각 중입니다... 🤔");
-            computerMove(newBoard);
+            setTimeout(() => {
+              setCapturedIndex(null);
+              if (capturedPiece) {
+                setStatus(`얍! ${capturedPiece.emoji}를 물리쳤어요!`);
+                if (capturedPiece.type === 'king' && currentMode === 'match') {
+                  setGameOver(true);
+                  const winner = movingPiece.color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
+                  setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
+                  setTutorialText(`체크메이트! ${winner}이 이겼습니다!`);
+                  return;
+                }
+              } else {
+                setStatus(`스르륵~ 이동 완료!`);
+              }
+
+              if (currentMode === 'match') {
+                setTurn('black');
+                setTutorialText("컴퓨터 로봇이 생각 중입니다... 🤔");
+                computerMove(newBoard);
+              } else {
+                setTutorialText("연습 모드! 하얀 팀도, 검은 팀도 다 만져볼 수 있어!");
+              }
+            }, 300);
+          };
+
+          if (movingPiece.type === 'pawn' && (to < 8 || to >= 56)) {
+            setPromotionData({ from, to, color: movingPiece.color });
           } else {
-            setTutorialText("연습 모드! 하얀 팀도, 검은 팀도 다 만져볼 수 있어!");
+            finalizeMove();
           }
         }
         setSelectedSquareIndex(null);
         setValidMoves([]);
+        setCaptureMoves([]);
       } else {
         setTutorialText("앗, 거기는 갈 수 없는 길이야! 초록색 불빛을 따라가봐!");
       }
@@ -403,14 +473,63 @@ export default function App() {
         setSelectedSquareIndex(index);
         setTutorialText(currentMode === 'tutorial' ? clickedPiece.desc : "어디로 이동할까요?");
         setStatus(`어디로 갈까요? 초록색 길을 터치하세요!`);
-        const moves = calculateValidMoves(index, clickedPiece.type, clickedPiece.color, boardState);
+        const { moves, caps } = calculateValidMoves(index, clickedPiece.type, clickedPiece.color, boardState);
         setValidMoves(moves);
+        setCaptureMoves(caps);
       }
     }
   };
 
+  const handlePromotion = (type: PieceType, emoji: string) => {
+    if (!promotionData) return;
+    const { from, to, color } = promotionData;
+    const promotedPiece: PieceData = {
+      type,
+      emoji,
+      color,
+      desc: color === 'white' ? `하얀 ${type}` : `검은 ${type}`
+    };
+    
+    const capturedPiece = boardState[to];
+    const newBoard = [...boardState];
+    
+    if (capturedPiece) {
+      setCapturedIndex(to);
+      captureSoundRef.current?.play();
+    }
+    
+    newBoard[to] = promotedPiece;
+    newBoard[from] = null;
+    setBoardState(newBoard);
+    setPromotionData(null);
+
+    setTimeout(() => {
+      setCapturedIndex(null);
+      if (capturedPiece) {
+        setStatus(`얍! ${capturedPiece.emoji}를 물리쳤어요!`);
+        if (capturedPiece.type === 'king' && currentMode === 'match') {
+          setGameOver(true);
+          const winner = color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
+          setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
+          setTutorialText(`체크메이트! ${winner}이 이겼습니다!`);
+          return;
+        }
+      } else {
+        setStatus(`스르륵~ 이동 완료!`);
+      }
+
+      if (currentMode === 'match') {
+        setTurn('black');
+        setTutorialText("컴퓨터 로봇이 생각 중입니다... 🤔");
+        computerMove(newBoard);
+      } else {
+        setTutorialText("연습 모드! 하얀 팀도, 검은 팀도 다 만져볼 수 있어!");
+      }
+    }, 300);
+  };
+
   return (
-    <div className="lego-chess-container">
+    <div className="lego-chess-container" ref={containerRef}>
       <h1 className="game-title">레고 체스 마스터</h1>
       
       <div className="music-controls">
@@ -442,6 +561,29 @@ export default function App() {
       <div id="youtube-player" className="hidden"></div>
 
       <div className="lego-board">
+        {promotionData && (
+          <div className="promo-overlay">
+            <div className="promo-box">
+              <div className="promo-title">🎉 폰 승진! 어떤 말로 바꿀까요?</div>
+              <div className="promo-pieces">
+                {[
+                  { type: 'queen', emoji: promotionData.color === 'white' ? '♕' : '♛' },
+                  { type: 'rook', emoji: promotionData.color === 'white' ? '♖' : '♜' },
+                  { type: 'bishop', emoji: promotionData.color === 'white' ? '♗' : '♝' },
+                  { type: 'knight', emoji: promotionData.color === 'white' ? '♘' : '♞' },
+                ].map((p) => (
+                  <button 
+                    key={p.type}
+                    className="promo-piece-btn" 
+                    onClick={() => handlePromotion(p.type as PieceType, p.emoji)}
+                  >
+                    {p.emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {showMenu && (
           <div className="menu-overlay">
             <div className="menu-title">어떤 모드로 해볼까?</div>
@@ -452,9 +594,11 @@ export default function App() {
               </>
             ) : (
               <div className="diff-container">
-                <button className="diff-btn bg-[#8bc34a]" onClick={() => startMatch('easy')}>초급 (눈감고 두는 로봇)</button>
-                <button className="diff-btn bg-[#ff9800]" onClick={() => startMatch('medium')}>중급 (먹보 로봇)</button>
-                <button className="diff-btn bg-[#f44336]" onClick={() => startMatch('hard')}>고급 (똑똑이 로봇)</button>
+                <button className="diff-btn bg-[#8bc34a]" onClick={() => startMatch('level1')}>1단계: 입문 (랜덤 로봇)</button>
+                <button className="diff-btn bg-[#ffca28] !text-[#333]" onClick={() => startMatch('level2')}>2단계: 초급 (변덕쟁이)</button>
+                <button className="diff-btn bg-[#ff9800]" onClick={() => startMatch('level3')}>3단계: 중급 (먹보 로봇)</button>
+                <button className="diff-btn bg-[#f44336]" onClick={() => startMatch('level4')}>4단계: 고급 (전략가 로봇)</button>
+                <button className="diff-btn bg-[#9c27b0]" onClick={() => startMatch('level5')}>5단계: 마스터 (예언자 로봇)</button>
                 <button className="menu-btn mt-4" onClick={() => setShowDifficulty(false)}>뒤로 가기</button>
               </div>
             )}
@@ -466,23 +610,25 @@ export default function App() {
           const isDark = (row + col) % 2 !== 0;
           const isSelected = selectedSquareIndex === index;
           const isValidMove = validMoves.includes(index);
+          const isCaptureMove = captureMoves.includes(index);
+          const isBeingCaptured = capturedIndex === index;
           const piece = boardState[index];
 
           return (
             <div
               key={index}
               onClick={() => handleSquareClick(index)}
-              className={`square ${isDark ? 'dark-square' : 'light-square'} ${isValidMove ? 'valid-move' : ''}`}
+              className={`square ${isDark ? 'dark-square' : 'light-square'} ${isValidMove ? 'valid-move' : ''} ${isCaptureMove ? 'capture-move' : ''}`}
             >
               <AnimatePresence>
                 {piece && (
                   <motion.div
                     key={`${piece.type}-${piece.color}-${index}`}
                     layoutId={`piece-${piece.type}-${piece.color}-${index}`}
-                    className={`piece ${isSelected ? 'selected' : ''}`}
+                    className={`piece ${isSelected ? 'selected' : ''} ${isBeingCaptured ? 'being-captured' : ''}`}
                     initial={{ scale: 0, rotate: -180, opacity: 0 }}
                     animate={{
-                      scale: isSelected ? 1.15 : 1,
+                      scale: 1,
                       rotate: 0,
                       opacity: 1,
                       transform: `translate(0, 0)`,

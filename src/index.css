@@ -17,7 +17,7 @@
   --lego-board-dark: #1976d2;
   --lego-board-light: #fbc02d;
   --lego-stud-color: rgba(255, 255, 255, 0.3);
-  --board-size: 90vmin; 
+  --board-size: 90vmin; /* 기본값, 이제 JS가 기기 방향에 맞춰 이 값을 실시간으로 덮어씁니다! */
   --square-size: calc(var(--board-size) / 8);
 }
 
@@ -26,18 +26,28 @@ body {
   margin: 0;
   overflow: hidden; 
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   height: 100vh;
+  gap: 0;
+}
+
+.lego-chess-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--board-size);
+  position: relative; 
 }
 
 .game-title {
   color: var(--lego-red);
-  font-size: 5.5vmin; /* 조금 더 크게 강조 */
+  font-size: clamp(16px, 5vmin, 30px); 
   margin: 0 0 1vh 0;
   font-weight: 900;
-  letter-spacing: -0.1vmin; /* 글자 사이를 좁혀 귀엽게 */
-  text-shadow: 0.3vmin 0.3vmin 0 white; /* 글자 주변에 흰색 테두리 */
+  letter-spacing: -0.1vmin; 
+  text-shadow: 0.3vmin 0.3vmin 0 white; 
 }
 
 .music-controls {
@@ -49,7 +59,7 @@ body {
 
 .bgm-select {
   padding: 1vmin 2vmin;
-  font-size: 2.5vmin;
+  font-size: clamp(12px, 2.5vmin, 18px);
   font-family: inherit;
   border-radius: 2vmin;
   border: 0.4vmin solid var(--lego-red);
@@ -62,7 +72,7 @@ body {
 
 .bgm-btn {
   padding: 1.2vmin 3vmin;
-  font-size: 2.5vmin;
+  font-size: clamp(12px, 2.5vmin, 18px);
   background-color: var(--lego-red);
   color: white;
   border: none;
@@ -117,36 +127,49 @@ body {
 .light-square { background-color: var(--lego-board-light); }
 
 .piece {
-  font-size: calc(var(--square-size) * 0.85);
-  position: absolute; 
-  transition: transform 0.3s ease-in-out, background-color 0.2s;
-  z-index: 10; 
+  font-size: calc(var(--square-size) * 0.82);
+  position: absolute;
+  top: 0; left: 0;
+  transition: transform 0.25s ease-in-out, opacity 0.3s;
+  z-index: 10;
   width: var(--square-size);
   height: var(--square-size);
   display: flex;
   justify-content: center;
   align-items: center;
-  border-radius: 50%; 
-  top: 0;
-  left: 0;
-  pointer-events: none;
+  border-radius: 50%;
+  pointer-events: none; /* ✅ 기물이 square 클릭 이벤트를 가로채는 버그 수정 */
+  user-select: none;
 }
 
 .piece.selected {
-  background-color: rgba(255, 235, 59, 0.6); /* 밝은 노란색 배경 */
-  box-shadow: 0 0 2vmin 1vmin rgba(255, 235, 59, 0.8); /* 뿜어져 나오는 빛 */
-  z-index: 20; /* 다른 말들보다 제일 위로 올라오게 합니다 */
+  background-color: rgba(255, 235, 59, 0.85);
+  /* transform: scale(1.15) 제거 - JS translate와 충돌 방지 */
+  box-shadow: 0 0 2vmin 1.2vmin rgba(255, 235, 59, 0.85);
+  z-index: 20;
 }
 
+/* 이동 가능: 초록 점 */
 .valid-move::before {
   content: '';
   position: absolute;
-  width: 40%;
-  height: 40%;
-  background-color: rgba(76, 175, 80, 0.85); 
-  border: 0.3vmin solid white; /* 까만 말 위에서도 잘 보이게 하얀 테두리 추가 */
+  width: 38%; height: 38%;
+  background-color: rgba(76, 175, 80, 0.88);
+  border: 0.3vmin solid white;
   border-radius: 50%;
-  z-index: 15; /* 기물(10층)보다 더 높은 15층으로 변경! 절대 안 가려집니다. */
+  z-index: 15;
+  pointer-events: none;
+}
+
+/* 포획 가능: 붉은 테두리 */
+.capture-move::before {
+  content: '';
+  position: absolute;
+  inset: 6%;
+  border: 0.5vmin solid rgba(220, 53, 69, 0.9);
+  border-radius: 4%;
+  z-index: 15;
+  pointer-events: none;
 }
 
 .tutorial-box {
@@ -155,7 +178,7 @@ body {
   background-color: #fffde7;
   border: 0.5vmin dashed #fbc02d;
   border-radius: 2vmin;
-  font-size: 2.8vmin;
+  font-size: clamp(12px, 2.8vmin, 20px);
   text-align: center;
   width: 90%;
   min-height: 5vh;
@@ -164,11 +187,10 @@ body {
   font-weight: 500;
 }
 
-/* 🟢 [기능 추가를 위한 신규 CSS] 메뉴판 화면 */
 .menu-overlay {
   position: absolute;
   top: 0; left: 0; width: 100%; height: 100%;
-  background-color: rgba(255, 255, 255, 0.9);
+  background-color: rgba(255, 255, 255, 0.95);
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -177,21 +199,72 @@ body {
   border-radius: 2vmin;
 }
 
-.menu-title { font-size: 5vmin; color: #1976d2; margin-bottom: 3.5vh; font-weight: bold; letter-spacing: -0.1vmin; }
+.menu-title { font-size: clamp(18px, 4.5vmin, 28px); color: #1976d2; margin-bottom: 2vh; font-weight: bold; }
 
 .menu-btn {
-  width: 70%; padding: 2.2vh; margin-bottom: 1.8vh;
-  font-size: 3.2vmin; font-weight: bold; font-family: inherit;
+  width: 80%; padding: 1.5vh; margin-bottom: 1.5vh;
+  font-size: clamp(14px, 3vmin, 22px); font-weight: bold; font-family: inherit;
   background-color: #fbc02d; color: #333;
-  border: 0.5vmin solid #f57f17; border-radius: 2.5vmin;
+  border: 0.5vmin solid #f57f17; border-radius: 2vmin;
   cursor: pointer; box-shadow: 0 0.5vmin 1vmin rgba(0,0,0,0.2);
 }
 .menu-btn:active { transform: scale(0.95); }
 
-.diff-container { display: flex; flex-direction: column; width: 70%; }
+.diff-container { display: flex; flex-direction: column; width: 80%; }
 .diff-btn {
-  padding: 1.8vh; margin-bottom: 1.2vh; font-size: 2.8vmin; font-family: inherit;
-  background-color: #4CAF50; color: white; border: none; border-radius: 2vmin;
+  padding: 1.2vh; margin-bottom: 1vh; font-size: clamp(12px, 2.5vmin, 18px); font-family: inherit;
+  color: white; border: none; border-radius: 2vmin;
   cursor: pointer; font-weight: bold;
 }
 .diff-btn:active { transform: scale(0.95); }
+
+/* 폰 승진 모달 */
+.promo-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.promo-box {
+  background: white;
+  border-radius: 3vmin;
+  padding: 3vmin;
+  text-align: center;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.4);
+  min-width: 60vmin;
+}
+.promo-title {
+  font-size: clamp(14px, 3.5vmin, 22px);
+  font-weight: bold;
+  margin-bottom: 2vmin;
+  color: #333;
+}
+.promo-pieces {
+  display: flex;
+  justify-content: center;
+  gap: 3vmin;
+}
+.promo-piece-btn {
+  font-size: clamp(28px, 8vmin, 56px);
+  background: none;
+  border: 0.5vmin solid #ccc;
+  border-radius: 2vmin;
+  cursor: pointer;
+  padding: 1vmin;
+  transition: transform 0.1s, background 0.1s;
+}
+.promo-piece-btn:hover  { background: #fffde7; transform: scale(1.1); }
+.promo-piece-btn:active { transform: scale(0.95); }
+
+@keyframes captureAnim {
+  0%   { transform: scale(1)   rotate(0);    opacity: 1; }
+  50%  { transform: scale(1.3) rotate(180deg); opacity: 0.6; }
+  100% { transform: scale(0)   rotate(360deg); opacity: 0; }
+}
+.piece.being-captured {
+  animation: captureAnim 0.3s ease-out forwards;
+  z-index: 25;
+}
