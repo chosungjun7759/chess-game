@@ -108,8 +108,6 @@ function pieceSVG(type: PieceType, color: PieceColor) {
   const D = isW ? '#1a1510' : '#e0c898';
   const sw = 1.5;
 
-  // ★ 핵심 수정: attribute 방식 → style="" 방식으로 변경
-  // React에서는 style 객체로 전달
   const G = { fill: F, stroke: S, strokeWidth: `${sw}px`, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   const G2 = { fill: F2, stroke: S, strokeWidth: `${sw}px`, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   const Gd = { fill: D, stroke: 'none' };
@@ -660,6 +658,18 @@ export default function App() {
     setStatus('컴퓨터 대결 시작! 아들 차례 — 하얀 말을 먼저 움직여!');
   };
 
+  const handleHomeClick = () => {
+    if (window.confirm("진행 중인 게임이 초기화됩니다. 처음 메뉴로 돌아가시겠습니까?")) {
+      setShowMenu(true);
+      setShowDiffOptions(false);
+      setGameOver(true);
+      setStatus('모드를 골라주세요!');
+      setSelIdx(null);
+      setMoveCells([]);
+      setCapCells([]);
+    }
+  };
+
   return (
     <div className="container">
       <h1 className="game-title">♟ 체스마스터</h1>
@@ -672,6 +682,7 @@ export default function App() {
         <button className="bgm-btn" onClick={toggleBGM} style={{ background: bgmOn ? '#4caf50' : 'var(--lego-red)' }}>
           {bgmOn ? '🔇 음악 끄기' : '▶ 음악 켜기'}
         </button>
+        <button className="bgm-btn" onClick={handleHomeClick} style={{ background: '#ff9800' }}>🏠 메뉴로</button>
       </div>
 
       <div id="youtube-player" style={{ display: 'none' }}></div>
@@ -744,7 +755,7 @@ export default function App() {
         </div>
       )}
 
-      {gameOver && (
+      {gameOver && !showMenu && (
         <div className="promo-overlay" onClick={() => window.location.reload()}>
           <div className="promo-box">
             <div className="promo-title">게임 종료!</div>
