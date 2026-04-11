@@ -11,13 +11,18 @@ type PieceColor = 'white' | 'black';
 interface PieceData {
   type: PieceType;
   color: PieceColor;
-  desc: string;
+  hasMoved: boolean;
 }
 
-// ── 기물 가치 (센티폰 단위) ──
+interface Move {
+  from?: number;
+  to: number;
+  flag: 'normal' | 'pawn_double' | 'ep' | 'castle_ks' | 'castle_qs';
+  captureIdx: number | null;
+}
+
 const VAL: Record<PieceType, number> = { pawn: 100, knight: 320, bishop: 330, rook: 500, queen: 950, king: 20000 };
 
-// ── 기물-위치 테이블 (PST) — 백 기준, 흑은 수직 미러 ──
 const PST: Record<PieceType, number[]> = {
   pawn: [
      0,  0,  0,  0,  0,  0,  0,  0,
@@ -100,96 +105,131 @@ const DESC: Record<PieceColor, Record<PieceType, string>> = {
   }
 };
 
-function pieceSVG(type: PieceType, color: PieceColor) {
+function PieceSVG({ type, color }: { type: PieceType; color: PieceColor }) {
   const isW = color === 'white';
-  const F = isW ? '#f0ece0' : '#1c1810';
-  const F2 = isW ? '#e0dbc8' : '#2c2418';
-  const S = isW ? '#1a1510' : '#c0a870';
-  const D = isW ? '#1a1510' : '#e0c898';
-  const sw = 1.5;
+  const p = isW ? 'W' : 'B';
+  const [b1, b2, b3] = isW ? ['#fffef5', '#d8c8a8', '#9a8060'] : ['#8a6238', '#2e1a0c', '#0e0806'];
+  const [s1, s2] = isW ? ['#d0b888', '#7a5c38'] : ['#402010', '#100806'];
+  const ol = isW ? '#3a2410' : '#d8a850';
+  const spC = isW ? 'rgba(255,255,240,0.70)' : 'rgba(255,210,90,0.30)';
+  const shC = isW ? '#2a180a' : '#000000';
+  const sw = 0.85;
 
-  const G = { fill: F, stroke: S, strokeWidth: `${sw}px`, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  const G2 = { fill: F2, stroke: S, strokeWidth: `${sw}px`, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
-  const Gd = { fill: D, stroke: 'none' };
-  const Gl = { fill: 'none', stroke: D, strokeWidth: '1px', strokeLinecap: 'round' as const };
+  const mkBase = (rx = 11) => {
+    const x1 = (22.5 - rx).toFixed(1), x2 = (22.5 + rx).toFixed(1);
+    const x3 = (22.5 - rx + 1.8).toFixed(1), x4 = (22.5 + rx - 1.8).toFixed(1);
+    return (
+      <>
+        <ellipse cx="22.5" cy="41.5" rx={(rx + 1.5).toFixed(1)} ry="1.8" fill="rgba(0,0,0,0.28)" />
+        <path d={`M${x1},39 Q22.5,41.8 ${x2},39 L${x4},35.5 Q22.5,37.8 ${x3},35.5 Z`}
+          fill={`url(#lg${p})`} stroke={ol} strokeWidth={sw} />
+      </>
+    );
+  };
 
-  const base = <rect x="9.5" y="36" width="26" height="3.8" rx="1.9" style={G} />;
+  const defs = (
+    <defs>
+      <radialGradient id={`rg${p}`} cx="33%" cy="25%" r="72%" gradientUnits="objectBoundingBox">
+        <stop offset="0%" stopColor={b1} />
+        <stop offset="45%" stopColor={b2} />
+        <stop offset="100%" stopColor={b3} />
+      </radialGradient>
+      <linearGradient id={`lg${p}`} x1="5%" y1="0%" x2="95%" y2="100%">
+        <stop offset="0%" stopColor={s1} />
+        <stop offset="100%" stopColor={s2} />
+      </linearGradient>
+      <radialGradient id={`sp${p}`} cx="25%" cy="20%" r="55%" gradientUnits="objectBoundingBox">
+        <stop offset="0%" stopColor={spC} />
+        <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+      </radialGradient>
+      <filter id={`sf${p}`} x="-50%" y="-40%" width="200%" height="200%">
+        <feDropShadow dx="0.7" dy="2" stdDeviation="1.5" floodColor={shC} floodOpacity="0.45" />
+      </filter>
+    </defs>
+  );
 
   switch (type) {
-    case 'pawn':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="22.5" cy="9.5" r="5.5" style={G} />
-          <path d="M 19,15 C 15.5,17 13.5,21 14,26 C 14.5,29.5 17,32 17,32 L 28,32 C 28,32 30.5,29.5 31,26 C 31.5,21 29.5,17 26,15 Z" style={G} />
-          <path d="M 11,36.2 L 34,36.2 L 33,32.5 C 29,32 16,32 12,32.5 Z" style={G} />
-          {base}
-        </svg>
-      );
-    case 'rook':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 9.5,14 L 9.5,9 L 14,9 L 14,12.5 L 18.5,12.5 L 18.5,9 L 22.5,9 L 22.5,12.5 L 27,12.5 L 27,9 L 31.5,9 L 31.5,12.5 L 35.5,12.5 L 35.5,9 L 35.5,14 Z" style={G} />
-          <rect x="12" y="14" width="21" height="14" rx="1" style={G} />
-          <path d="M 10,28 L 35,28 L 35,36.2 L 10,36.2 Z" style={G} />
-          {base}
-          <line x1="14.5" y1="14" x2="14.5" y2="28" style={Gl} />
-          <line x1="30.5" y1="14" x2="30.5" y2="28" style={Gl} />
-        </svg>
-      );
-    case 'knight':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <path d="M 22,11 C 18.5,10.5 15,12.5 13.5,16.5 C 12,20.5 13,25.5 17,28 L 11.5,28 L 11.5,36.5 L 33.5,36.5 L 33.5,28 L 29,28 C 33,25.5 34.5,20.5 33,16.5 C 31.5,12.5 27,10.5 22,11 Z" style={G} />
-          <path d="M 22,11 L 24.5,6 L 29,10" style={{ fill: F, stroke: S, strokeWidth: `${sw}px`, strokeLinejoin: 'round' }} />
-          <circle cx="17" cy="19" r="2" style={Gd} />
-          <path d="M 13.5,24.5 Q 16,23 17.5,25.5" style={Gl} />
-          <path d="M 22,11 C 22,11 21,15 20,18" style={Gl} />
-          {base}
-        </svg>
-      );
-    case 'bishop':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="22.5" cy="7" r="3.5" style={G} />
-          <path d="M 22.5,10.5 C 17,14 13.5,20.5 14.5,27 C 15,31.5 19,35 22.5,35 C 26,35 30,31.5 30.5,27 C 31.5,20.5 28,14 22.5,10.5 Z" style={G} />
-          <path d="M 14.5,27.5 C 17.5,29 27.5,29 30.5,27.5" style={{ fill: 'none', stroke: S, strokeWidth: `${sw}px` }} />
-          <path d="M 11.5,36.2 L 33.5,36.2 L 33,32.5 C 29.5,33.5 15.5,33.5 12,32.5 Z" style={G} />
-          {base}
-          <line x1="22.5" y1="10.5" x2="22.5" y2="27" style={Gl} />
-        </svg>
-      );
-    case 'queen':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="5.5" cy="8" r="2.8" style={G} />
-          <circle cx="14" cy="3.5" r="2.8" style={G} />
-          <circle cx="22.5" cy="1.8" r="2.8" style={G} />
-          <circle cx="31" cy="3.5" r="2.8" style={G} />
-          <circle cx="39.5" cy="8" r="2.8" style={G} />
-          <path d="M 5.5,8 L 8.5,27 L 36.5,27 L 39.5,8 L 31,17.5 L 22.5,1.8 L 14,17.5 Z" style={G} />
-          <path d="M 8.5,27 L 11,33.5 L 34,33.5 L 36.5,27 Z" style={G2} />
-          <path d="M 9,27 C 13,25.5 32,25.5 36,27" style={{ fill: 'none', stroke: S, strokeWidth: `${sw}px` }} />
-          {base}
-        </svg>
-      );
-    case 'king':
-      return (
-        <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg">
-          <rect x="21" y="1" width="3.5" height="13" rx="1.75" style={G} />
-          <rect x="16.5" y="4.5" width="12" height="3.5" rx="1.75" style={G} />
-          <path d="M 12.5,37 L 12.5,28 C 12.5,20.5 17,17.5 22.5,17.5 C 28,17.5 32.5,20.5 32.5,28 L 32.5,37 Z" style={G} />
-          <path d="M 12.5,28 C 16,26.5 29,26.5 32.5,28" style={{ fill: 'none', stroke: S, strokeWidth: `${sw}px` }} />
-          <path d="M 11,37 L 34,37 L 33.5,33.5 C 30,34.5 15,34.5 11.5,33.5 Z" style={G2} />
-          {base}
-        </svg>
-      );
-    default:
-      return <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg"></svg>;
+    case 'pawn': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(9.5)}
+        <path d="M15.5,35.5 C13.5,29.5 14.5,24.5 17,21.5 C18.5,19.8 19.5,18.5 20,17.5 L25,17.5 C25.5,18.5 26.5,19.8 28,21.5 C30.5,24.5 31.5,29.5 29.5,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M20,17.5 Q19.5,15.2 19.5,14.5 Q20.5,13.4 22.5,13.2 Q24.5,13.4 25.5,14.5 Q25.5,15.2 25,17.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="22.5" cy="9.2" r="6" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <ellipse cx="19.2" cy="7" rx="3.2" ry="2.2" fill={`url(#sp${p})`} opacity="0.85" />
+        <ellipse cx="18.8" cy="26" rx="2.8" ry="4" fill={`url(#sp${p})`} opacity="0.6" />
+      </svg>
+    );
+    case 'rook': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(11)}
+        <path d="M14,35.5 L14,17.5 Q13.8,15.8 15.5,15.5 L29.5,15.5 Q31.2,15.8 31,17.5 L31,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M14,15.5 L14,10.5 L18,10.5 L18,13.5 L20,13.5 L20,10.5 L25,10.5 L25,13.5 L27,13.5 L27,10.5 L31,10.5 L31,15.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <line x1="19" y1="15.5" x2="19" y2="35.5" stroke={ol} strokeWidth="0.5" opacity="0.3" />
+        <line x1="26" y1="15.5" x2="26" y2="35.5" stroke={ol} strokeWidth="0.5" opacity="0.3" />
+        <line x1="14" y1="13.5" x2="18" y2="13.5" stroke={ol} strokeWidth="0.5" opacity="0.35" />
+        <line x1="20" y1="13.5" x2="25" y2="13.5" stroke={ol} strokeWidth="0.5" opacity="0.35" />
+        <line x1="27" y1="13.5" x2="31" y2="13.5" stroke={ol} strokeWidth="0.5" opacity="0.35" />
+        <rect x="15" y="17.5" width="5" height="16" rx="2" fill={`url(#sp${p})`} opacity="0.45" />
+      </svg>
+    );
+    case 'knight': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(10.5)}
+        <path d="M 13,35.5 C 12.5,27.5 13,22 14.5,18 C 15.5,15 15,12.5 16.5,10.5 C 17.5,9 18.5,7.5 20,6.5 L 22,5.8 C 23.2,6.2 23.8,7.8 23,9 C 25.2,9.5 27.5,11 29,13.5 C 30.5,16 30.5,18.5 29.5,20.5 C 28.5,22.5 27,23.5 28.5,26 L 32,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth="0.9" filter={`url(#sf${p})`} />
+        <path d="M 20,6.5 L 18.5,9 L 22.5,8.8 Z" fill={ol} opacity="0.75" />
+        <circle cx="24.8" cy="11.5" r="1.7" fill={ol} />
+        <circle cx="25.3" cy="11" r="0.7" fill={isW ? 'rgba(255,255,230,0.9)' : 'rgba(255,220,90,0.85)'} />
+        <ellipse cx="29.2" cy="19.5" rx="1.3" ry="0.85" fill={ol} opacity="0.5" />
+        <path d="M 23,9 C 21.5,10.5 20.5,12 19.8,13.5 C 19,15 18.5,16.5 18,18" stroke={ol} strokeWidth="1" fill="none" strokeLinecap="round" opacity="0.5" />
+        <path d="M 24.5,14.5 C 26,15.5 27,17 27.5,18.5" stroke={ol} strokeWidth="0.65" fill="none" opacity="0.35" />
+        <ellipse cx="18.5" cy="14" rx="2.5" ry="4.5" fill={`url(#sp${p})`} opacity="0.6" />
+      </svg>
+    );
+    case 'bishop': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(10)}
+        <path d="M16.5,35.5 C15,29 15.5,23.5 18,20 C19.5,18 20.5,17 21,16.5 L24,16.5 C24.5,17 25.5,18 27,20 C29.5,23.5 30,29 28.5,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M16.5,16.5 Q22.5,18.8 28.5,16.5 Q27.5,14.2 22.5,13.8 Q17.5,14.2 16.5,16.5 Z" fill={`url(#lg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="22.5" cy="10.5" r="4.2" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M 20,9 L 25,12.5" stroke={ol} strokeWidth="1.4" strokeLinecap="round" />
+        <ellipse cx="22.5" cy="6.3" rx="1.4" ry="2.2" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <ellipse cx="20.3" cy="8.8" rx="2.3" ry="1.7" fill={`url(#sp${p})`} opacity="0.8" />
+        <ellipse cx="19.5" cy="25.5" rx="2.5" ry="4.5" fill={`url(#sp${p})`} opacity="0.55" />
+      </svg>
+    );
+    case 'queen': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(11.5)}
+        <path d="M14.5,35.5 C13,29 14,23.5 17,20 C18.5,18 20,17 21,16.5 L24,16.5 C25,17 26.5,18 28,20 C31,23.5 32,29 30.5,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M16,16.5 Q22.5,18.8 29,16.5 Q28,14 22.5,13.5 Q17,14 16,16.5 Z" fill={`url(#lg${p})`} stroke={ol} strokeWidth={sw} />
+        <path d="M15.5,13.5 Q18.5,10 22.5,9 Q26.5,10 29.5,13.5" stroke={ol} strokeWidth="0.75" fill="none" strokeLinecap="round" opacity="0.8" />
+        <circle cx="13.5" cy="12" r="2.1" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="18.5" cy="9" r="2.1" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="22.5" cy="7.5" r="2.4" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="26.5" cy="9" r="2.1" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="31.5" cy="12" r="2.1" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <circle cx="22" cy="7" r="1.1" fill={`url(#sp${p})`} opacity="0.9" />
+        <ellipse cx="19" cy="25.5" rx="3" ry="4.5" fill={`url(#sp${p})`} opacity="0.5" />
+      </svg>
+    );
+    case 'king': return (
+      <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" overflow="visible">
+        {defs} {mkBase(11.5)}
+        <path d="M14.5,35.5 C13,29 14,23.5 17,20 C18.5,18 20,17 21,16.5 L24,16.5 C25,17 26.5,18 28,20 C31,23.5 32,29 30.5,35.5 Z" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <path d="M16,16.5 Q22.5,18.8 29,16.5 Q28,14 22.5,13.5 Q17,14 16,16.5 Z" fill={`url(#lg${p})`} stroke={ol} strokeWidth={sw} />
+        <rect x="20.8" y="4.5" width="3.4" height="11" rx="1.5" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} filter={`url(#sf${p})`} />
+        <rect x="17" y="7.8" width="11" height="3.4" rx="1.5" fill={`url(#rg${p})`} stroke={ol} strokeWidth={sw} />
+        <rect x="20.8" y="7.8" width="3.4" height="3.4" rx="0.5" fill={isW ? 'rgba(255,255,220,0.4)' : 'rgba(255,200,60,0.2)'} />
+        <ellipse cx="21.2" cy="6.5" rx="1.3" ry="2" fill={`url(#sp${p})`} opacity="0.75" />
+        <ellipse cx="19" cy="25.5" rx="3" ry="4.5" fill={`url(#sp${p})`} opacity="0.5" />
+      </svg>
+    );
+    default: return <svg viewBox="0 0 45 45" xmlns="http://www.w3.org/2000/svg" />;
   }
 }
 
 function makeSetup(): (PieceData | null)[] {
-  const row = (color: PieceColor, type: PieceType) => ({ type, color, desc: DESC[color][type] });
+  const row = (color: PieceColor, type: PieceType) => ({ type, color, hasMoved: false });
   const pawns = (c: PieceColor) => Array(8).fill(null).map(() => row(c, 'pawn'));
   const back = (c: PieceColor) => (['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'] as PieceType[]).map(t => row(c, t));
   return [...back('black'), ...pawns('black'), ...Array(32).fill(null), ...pawns('white'), ...back('white')];
@@ -198,12 +238,11 @@ function makeSetup(): (PieceData | null)[] {
 export default function App() {
   const [boardState, setBoardState] = useState<(PieceData | null)[]>(makeSetup());
   const [selIdx, setSelIdx] = useState<number | null>(null);
-  const [moveCells, setMoveCells] = useState<number[]>([]);
-  const [capCells, setCapCells] = useState<number[]>([]);
+  const [validMoves, setValidMoves] = useState<Move[]>([]);
   const [turn, setTurn] = useState<PieceColor | ''>('');
   const [gameOver, setGameOver] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [gameMode, setGameMode] = useState<'tutorial' | 'match' | ''>('');
+  const [gameMode, setGameMode] = useState<'tutorial' | 'match' | 'menu' | ''>('');
   const [gameDiff, setGameDiff] = useState<string>('');
   const [showMenu, setShowMenu] = useState(true);
   const [showDiffOptions, setShowDiffOptions] = useState(false);
@@ -211,24 +250,34 @@ export default function App() {
   const [bgmOn, setBgmOn] = useState(false);
   const [bgmId, setBgmId] = useState('iQIkgz9P-nM');
   const [capturedIdx, setCapturedIdx] = useState<number | null>(null);
-  const [promotionData, setPromotionData] = useState<{ idx: number; color: PieceColor; from: number; captured: PieceData | null } | null>(null);
+  const [promotionData, setPromotionData] = useState<{ idx: number; color: PieceColor; from: number } | null>(null);
+  const [epSquare, setEpSquare] = useState<number | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const playerRef = useRef<any>(null);
+  const aiTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const animTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const fitBoard = useCallback(() => {
+    const root = document.documentElement;
+    const title = document.querySelector('.game-title') as HTMLElement;
+    const ctrls = document.querySelector('.music-controls') as HTMLElement;
+    const info = document.querySelector('.info-box') as HTMLElement;
+
+    const titleR = title ? title.getBoundingClientRect() : { height: 0 };
+    const ctrlsR = ctrls ? ctrls.getBoundingClientRect() : { height: 0 };
+    const infoR = info ? info.getBoundingClientRect() : { height: 0 };
+
+    const uiH = (titleR.height + ctrlsR.height + infoR.height) + 48;
+    const size = Math.max(120, Math.min(Math.floor(window.innerWidth * 0.97), Math.floor(window.innerHeight - uiH)));
+    root.style.setProperty('--board-size', size + 'px');
+  }, []);
 
   useEffect(() => {
-    const fitBoard = () => {
-      const root = document.documentElement;
-      const title = document.querySelector('.game-title') as HTMLElement;
-      const ctrls = document.querySelector('.music-controls') as HTMLElement;
-      const info = document.querySelector('.info-box') as HTMLElement;
-      const uiH = (title?.offsetHeight || 0) + (ctrls?.offsetHeight || 0) + (info?.offsetHeight || 0) + 52;
-      const size = Math.floor(Math.min(window.innerWidth * 0.97, window.innerHeight - uiH));
-      root.style.setProperty('--board-size', size + 'px');
-    };
     window.addEventListener('resize', fitBoard);
     fitBoard();
     return () => window.removeEventListener('resize', fitBoard);
-  }, []);
+  }, [fitBoard]);
 
   useEffect(() => {
     if (!(window as any).YT) {
@@ -240,11 +289,11 @@ export default function App() {
 
     (window as any).onYouTubeIframeAPIReady = () => {
       playerRef.current = new (window as any).YT.Player('youtube-player', {
-        height: '0',
-        width: '0',
+        height: '1',
+        width: '1',
         videoId: bgmId,
         host: 'https://www.youtube-nocookie.com',
-        playerVars: { autoplay: 0, loop: 1, playlist: bgmId }
+        playerVars: { autoplay: 0, loop: 1, playlist: bgmId, playsinline: 1 }
       });
     };
   }, []);
@@ -265,151 +314,264 @@ export default function App() {
     setBgmId(id);
     if (playerRef.current && typeof playerRef.current.loadVideoById === 'function') {
       playerRef.current.loadVideoById(id);
-      setBgmOn(true);
+      if (!bgmOn) playerRef.current.stopVideo();
     }
   };
 
-  const calcMoves = useCallback((idx: number, state: (PieceData | null)[]) => {
-    const p = state[idx];
-    if (!p) return { moves: [], caps: [] };
-    const moves: number[] = [];
-    const caps: number[] = [];
+  const isSquareAttacked = useCallback((idx: number, attackerColor: PieceColor, state: (PieceData | null)[]) => {
     const r = Math.floor(idx / 8);
     const c = idx % 8;
     const ok = (nr: number, nc: number) => nr >= 0 && nr < 8 && nc >= 0 && nc < 8;
 
-    const reg = (nr: number, nc: number) => {
+    const pDir = attackerColor === 'white' ? 1 : -1;
+    if (ok(r + pDir, c - 1) && state[(r + pDir) * 8 + c - 1]?.type === 'pawn' && state[(r + pDir) * 8 + c - 1]?.color === attackerColor) return true;
+    if (ok(r + pDir, c + 1) && state[(r + pDir) * 8 + c + 1]?.type === 'pawn' && state[(r + pDir) * 8 + c + 1]?.color === attackerColor) return true;
+
+    for (const m of [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]]) {
+      if (ok(r + m[0], c + m[1]) && state[(r + m[0]) * 8 + c + m[1]]?.type === 'knight' && state[(r + m[0]) * 8 + c + m[1]]?.color === attackerColor) return true;
+    }
+    for (const m of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]) {
+      if (ok(r + m[0], c + m[1]) && state[(r + m[0]) * 8 + c + m[1]]?.type === 'king' && state[(r + m[0]) * 8 + c + m[1]]?.color === attackerColor) return true;
+    }
+
+    const checkSlide = (dirs: number[][], types: PieceType[]) => {
+      for (const d of dirs) {
+        for (let i = 1; i < 8; i++) {
+          const nr = r + d[0] * i;
+          const nc = c + d[1] * i;
+          if (!ok(nr, nc)) break;
+          const t = state[nr * 8 + nc];
+          if (t) {
+            if (t.color === attackerColor && types.includes(t.type)) return true;
+            break;
+          }
+        }
+      }
+      return false;
+    };
+    if (checkSlide([[-1, 0], [1, 0], [0, -1], [0, 1]], ['rook', 'queen'])) return true;
+    if (checkSlide([[-1, -1], [-1, 1], [1, -1], [1, 1]], ['bishop', 'queen'])) return true;
+
+    return false;
+  }, []);
+
+  const getPseudoMoves = useCallback((idx: number, state: (PieceData | null)[], currentEpSq: number | null) => {
+    const p = state[idx];
+    if (!p) return [];
+    const moves: Move[] = [];
+    const r = Math.floor(idx / 8);
+    const c = idx % 8;
+    const ok = (nr: number, nc: number) => nr >= 0 && nr < 8 && nc >= 0 && nc < 8;
+
+    const add = (nr: number, nc: number, flag: Move['flag'] = 'normal', capIdx: number | null = null) => {
       if (!ok(nr, nc)) return false;
       const t = state[nr * 8 + nc];
       if (!t) {
-        moves.push(nr * 8 + nc);
+        moves.push({ to: nr * 8 + nc, flag, captureIdx: capIdx });
         return true;
       }
-      if (t.color !== p.color) caps.push(nr * 8 + nc);
+      if (t.color !== p.color) {
+        moves.push({ to: nr * 8 + nc, flag, captureIdx: nr * 8 + nc });
+      }
       return false;
     };
 
-    const slide = (dirs: [number, number][]) =>
-      dirs.forEach(([dr, dc]) => {
-        for (let i = 1; i < 8; i++) if (!reg(r + dr * i, c + dc * i)) break;
-      });
+    if (p.type === 'rook' || p.type === 'queen') [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(d => { for (let i = 1; i < 8; i++) if (!add(r + d[0] * i, c + d[1] * i)) break; });
+    if (p.type === 'bishop' || p.type === 'queen') [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(d => { for (let i = 1; i < 8; i++) if (!add(r + d[0] * i, c + d[1] * i)) break; });
+    if (p.type === 'knight') [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]].forEach(d => add(r + d[0], c + d[1]));
+    if (p.type === 'king') [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]].forEach(d => add(r + d[0], c + d[1]));
 
-    if (p.type === 'rook' || p.type === 'queen') slide([[-1, 0], [1, 0], [0, -1], [0, 1]]);
-    if (p.type === 'bishop' || p.type === 'queen') slide([[-1, -1], [-1, 1], [1, -1], [1, 1]]);
-    if (p.type === 'knight')
-      [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]].forEach(([dr, dc]) => reg(r + dr, c + dc));
-    if (p.type === 'king')
-      [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]].forEach(([dr, dc]) => reg(r + dr, c + dc));
     if (p.type === 'pawn') {
       const dir = p.color === 'white' ? -1 : 1;
-      const sr = p.color === 'white' ? 6 : 1;
+      const startR = p.color === 'white' ? 6 : 1;
       if (ok(r + dir, c) && !state[(r + dir) * 8 + c]) {
-        moves.push((r + dir) * 8 + c);
-        if (r === sr && !state[(r + dir * 2) * 8 + c]) moves.push((r + dir * 2) * 8 + c);
+        moves.push({ to: (r + dir) * 8 + c, flag: 'normal', captureIdx: null });
+        if (r === startR && !state[(r + dir * 2) * 8 + c]) moves.push({ to: (r + dir * 2) * 8 + c, flag: 'pawn_double', captureIdx: null });
       }
       [-1, 1].forEach(dc => {
         if (ok(r + dir, c + dc)) {
           const t = state[(r + dir) * 8 + (c + dc)];
-          if (t && t.color !== p.color) caps.push((r + dir) * 8 + (c + dc));
+          if (t && t.color !== p.color) moves.push({ to: (r + dir) * 8 + (c + dc), flag: 'normal', captureIdx: (r + dir) * 8 + (c + dc) });
+          else if (currentEpSq === (r + dir) * 8 + (c + dc)) moves.push({ to: currentEpSq, flag: 'ep', captureIdx: r * 8 + (c + dc) });
         }
       });
     }
-    return { moves, caps };
+    return moves;
   }, []);
 
-  const getAllMoves = useCallback((color: PieceColor, state: (PieceData | null)[]) => {
-    const caps: { from: number; to: number; isCapture: boolean }[] = [];
-    const quiets: { from: number; to: number; isCapture: boolean }[] = [];
-    for (let i = 0; i < 64; i++) {
-      if (!state[i] || state[i]!.color !== color) continue;
-      const { moves, caps: cs } = calcMoves(i, state);
-      cs.forEach(to => caps.push({ from: i, to, isCapture: true }));
-      moves.forEach(to => quiets.push({ from: i, to, isCapture: false }));
+  const applyMoveInPlace = useCallback((state: (PieceData | null)[], move: Move & { from: number }) => {
+    const undo = { targetPiece: state[move.to], capPiece: null as PieceData | null, hasMoved: state[move.from]!.hasMoved, promoted: false, newEp: null as number | null };
+    if (move.captureIdx !== null && move.captureIdx !== move.to) { undo.capPiece = state[move.captureIdx]; state[move.captureIdx] = null; }
+    if (move.flag === 'castle_ks') { state[move.to - 1] = state[move.to + 1]; state[move.to + 1] = null; }
+    else if (move.flag === 'castle_qs') { state[move.to + 1] = state[move.to - 2]; state[move.to - 2] = null; }
+    else if (move.flag === 'pawn_double') { undo.newEp = (move.from + move.to) / 2; }
+
+    state[move.to] = state[move.from]; state[move.from] = null; state[move.to]!.hasMoved = true;
+    if (state[move.to]!.type === 'pawn' && (move.to < 8 || move.to >= 56)) { state[move.to]!.type = 'queen'; undo.promoted = true; }
+    return undo;
+  }, []);
+
+  const undoMoveInPlace = useCallback((state: (PieceData | null)[], move: Move & { from: number }, undo: any) => {
+    state[move.from] = state[move.to]; state[move.to] = undo.targetPiece; state[move.from]!.hasMoved = undo.hasMoved;
+    if (undo.promoted) { state[move.from]!.type = 'pawn'; }
+    if (move.captureIdx !== null && move.captureIdx !== move.to) { state[move.captureIdx] = undo.capPiece; }
+    if (move.flag === 'castle_ks') { state[move.to + 1] = state[move.to - 1]; state[move.to - 1] = null; }
+    else if (move.flag === 'castle_qs') { state[move.to - 2] = state[move.to + 1]; state[move.to + 1] = null; }
+  }, []);
+
+  const getLegalMoves = useCallback((idx: number, state: (PieceData | null)[], currentEpSq: number | null) => {
+    const p = state[idx];
+    if (!p) return [];
+    const pseudo = getPseudoMoves(idx, state, currentEpSq);
+    const legal: Move[] = [];
+    const enemyColor = p.color === 'white' ? 'black' : 'white';
+
+    for (const m of pseudo) {
+      const undo = applyMoveInPlace(state, { from: idx, ...m });
+      let myKingIdx = -1;
+      for (let i = 0; i < 64; i++) { if (state[i]?.type === 'king' && state[i]?.color === p.color) { myKingIdx = i; break; } }
+      if (myKingIdx !== -1 && !isSquareAttacked(myKingIdx, enemyColor, state)) {
+        legal.push(m);
+      }
+      undoMoveInPlace(state, { from: idx, ...m }, undo);
     }
-    return [...caps, ...quiets];
-  }, [calcMoves]);
 
-  const applyMove = (state: (PieceData | null)[], from: number, to: number) => {
-    const s = [...state];
-    s[to] = s[from];
-    s[from] = null;
-    return s;
-  };
+    if (p.type === 'king' && !p.hasMoved && !isSquareAttacked(idx, enemyColor, state)) {
+      if (state[idx + 3]?.type === 'rook' && !state[idx + 3]?.hasMoved) {
+        if (!state[idx + 1] && !state[idx + 2]) {
+          if (!isSquareAttacked(idx + 1, enemyColor, state) && !isSquareAttacked(idx + 2, enemyColor, state)) {
+            legal.push({ to: idx + 2, flag: 'castle_ks', captureIdx: null });
+          }
+        }
+      }
+      if (state[idx - 4]?.type === 'rook' && !state[idx - 4]?.hasMoved) {
+        if (!state[idx - 1] && !state[idx - 2] && !state[idx - 3]) {
+          if (!isSquareAttacked(idx - 1, enemyColor, state) && !isSquareAttacked(idx - 2, enemyColor, state)) {
+            legal.push({ to: idx - 2, flag: 'castle_qs', captureIdx: null });
+          }
+        }
+      }
+    }
+    return legal;
+  }, [getPseudoMoves, isSquareAttacked, applyMoveInPlace, undoMoveInPlace]);
 
-  const getPST = (piece: PieceData, idx: number) => {
-    const tbl = PST[piece.type];
-    if (!tbl) return 0;
-    const r = Math.floor(idx / 8);
-    return piece.color === 'white' ? tbl[idx] : tbl[(7 - r) * 8 + (idx % 8)];
-  };
+  const getAllLegalMoves = useCallback((color: PieceColor, state: (PieceData | null)[], currentEpSq: number | null) => {
+    const all: (Move & { from: number })[] = [];
+    for (let i = 0; i < 64; i++) {
+      if (state[i] && state[i]!.color === color) {
+        const moves = getLegalMoves(i, state, currentEpSq);
+        moves.forEach(m => all.push({ from: i, ...m }));
+      }
+    }
+    return all;
+  }, [getLegalMoves]);
+
+  const simulateMove = useCallback((state: (PieceData | null)[], move: Move & { from: number }) => {
+    const sim = state.map(x => x ? { ...x } : null);
+    let newEp: number | null = null;
+    if (move.captureIdx !== null) sim[move.captureIdx] = null;
+
+    if (move.flag === 'castle_ks') {
+      sim[move.to - 1] = sim[move.to + 1];
+      sim[move.to + 1] = null;
+    } else if (move.flag === 'castle_qs') {
+      sim[move.to + 1] = sim[move.to - 2];
+      sim[move.to - 2] = null;
+    } else if (move.flag === 'pawn_double') {
+      newEp = (move.from + move.to) / 2;
+    }
+
+    sim[move.to] = sim[move.from];
+    sim[move.from] = null;
+    sim[move.to]!.hasMoved = true;
+
+    if (sim[move.to]!.type === 'pawn' && (move.to < 8 || move.to >= 56)) {
+      sim[move.to]!.type = 'queen';
+    }
+    return { sim, newEp };
+  }, []);
 
   const evaluate = useCallback((state: (PieceData | null)[]) => {
     let score = 0;
     for (let i = 0; i < 64; i++) {
       if (!state[i]) continue;
       const p = state[i]!;
-      const v = VAL[p.type] + getPST(p, i);
+      const r = Math.floor(i / 8);
+      const c = i % 8;
+      const pstVal = PST[p.type] ? (p.color === 'white' ? PST[p.type][i] : PST[p.type][(7 - r) * 8 + c]) : 0;
+      const v = VAL[p.type] + pstVal;
       score += p.color === 'black' ? v : -v;
     }
     return score;
   }, []);
 
-  const minimax = useCallback((state: (PieceData | null)[], depth: number, isMax: boolean, alpha: number, beta: number): number => {
-    if (!state.some(p => p && p.type === 'king' && p.color === 'black')) return -500000;
-    if (!state.some(p => p && p.type === 'king' && p.color === 'white')) return 500000;
+  const minimax = useCallback((state: (PieceData | null)[], depth: number, isMax: boolean, alpha: number, beta: number, currentEp: number | null): number => {
+    const color = isMax ? 'black' : 'white';
+    const moves = getAllLegalMoves(color, state, currentEp);
+
+    if (moves.length === 0) {
+      let kingIdx = -1;
+      for (let i = 0; i < 64; i++) { if (state[i]?.type === 'king' && state[i]?.color === color) { kingIdx = i; break; } }
+      if (isSquareAttacked(kingIdx, isMax ? 'white' : 'black', state)) return isMax ? -999999 : 999999;
+      return 0;
+    }
+
     if (depth === 0) return evaluate(state);
 
-    const color = isMax ? 'black' : 'white';
-    const moves = getAllMoves(color, state);
-    if (moves.length === 0) return isMax ? -200000 : 200000;
+    // 🟢 Move Ordering: 비싼 말을 잡아먹는 수부터 먼저 계산하여 속도 향상
+    moves.sort((a, b) => {
+      const va = a.captureIdx !== null ? (VAL[state[a.captureIdx!]?.type] || 0) : 0;
+      const vb = b.captureIdx !== null ? (VAL[state[b.captureIdx!]?.type] || 0) : 0;
+      return vb - va;
+    });
 
     if (isMax) {
       let best = -Infinity;
       for (const m of moves) {
-        const v = minimax(applyMove(state, m.from, m.to), depth - 1, false, alpha, beta);
-        if (v > best) best = v;
-        if (v > alpha) alpha = v;
+        const undo = applyMoveInPlace(state, m);
+        const v = minimax(state, depth - 1, false, alpha, beta, undo.newEp);
+        undoMoveInPlace(state, m, undo);
+        best = Math.max(best, v);
+        alpha = Math.max(alpha, v);
         if (beta <= alpha) break;
       }
       return best;
     } else {
       let best = Infinity;
       for (const m of moves) {
-        const v = minimax(applyMove(state, m.from, m.to), depth - 1, true, alpha, beta);
-        if (v < best) best = v;
-        if (v < beta) beta = v;
+        const undo = applyMoveInPlace(state, m);
+        const v = minimax(state, depth - 1, true, alpha, beta, undo.newEp);
+        undoMoveInPlace(state, m, undo);
+        best = Math.min(best, v);
+        beta = Math.min(beta, v);
         if (beta <= alpha) break;
       }
       return best;
     }
-  }, [evaluate, getAllMoves]);
+  }, [evaluate, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, isSquareAttacked]);
 
-  const bestMove = useCallback((depth: number) => {
-    const all = getAllMoves('black', boardState);
-    if (all.length === 0) return null;
-    let bestScore = -Infinity;
-    let cands: { from: number; to: number; isCapture: boolean }[] = [];
-    for (const m of all) {
-      const sim = applyMove(boardState, m.from, m.to);
-      if (!sim.some(p => p && p.type === 'king' && p.color === 'white')) return m;
-      const s = minimax(sim, depth - 1, false, -Infinity, Infinity);
-      if (s > bestScore) {
-        bestScore = s;
-        cands = [m];
-      } else if (s === bestScore) {
-        cands.push(m);
-      }
-    }
-    return cands[Math.floor(Math.random() * cands.length)];
-  }, [boardState, getAllMoves, minimax]);
+  const afterMove = useCallback((isPlayer: boolean, nextEp: number | null) => {
+    if (gameMode === 'menu') return;
+    setEpSquare(nextEp);
 
-  const afterMove = useCallback((from: number, to: number, isPlayer: boolean, captured: PieceData | null) => {
-    if (captured && captured.type === 'king') {
-      const winner = boardState[to]?.color === 'white' ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
+    const nextColor = isPlayer ? 'black' : 'white';
+    const myLegalMoves = getAllLegalMoves(nextColor, boardState, nextEp);
+
+    if (myLegalMoves.length === 0) {
+      let myKingIdx = -1;
+      for (let i = 0; i < 64; i++) { if (boardState[i]?.type === 'king' && boardState[i]?.color === nextColor) { myKingIdx = i; break; } }
+      const isCheck = isSquareAttacked(myKingIdx, isPlayer ? 'white' : 'black', boardState);
+
       setGameOver(true);
-      setStatus(`🎉 게임 종료! ${winner} 승리! 🎉`);
+      if (isCheck) {
+        const winner = isPlayer ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
+        setStatus(`🎉 체크메이트! ${winner} 승리! 🎉`);
+      } else {
+        setStatus(`🤝 스테일메이트! 무승부입니다.`);
+      }
       return;
     }
+
     if (gameMode === 'match') {
       if (isPlayer) {
         setTurn('black');
@@ -419,93 +581,138 @@ export default function App() {
         setStatus('아들 차례! 멋지게 공격해봐요!');
       }
     } else {
-      setStatus('연습 모드! 하얀 팀·검은 팀 모두 만져볼 수 있어!');
+      setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
     }
-  }, [boardState, gameMode]);
+  }, [boardState, gameMode, getAllLegalMoves, isSquareAttacked]);
+
+  const executeRealMove = useCallback((from: number, move: Move, isPlayer: boolean) => {
+    setIsAnimating(true);
+    setSelIdx(null);
+    setValidMoves([]);
+
+    let nextEp: number | null = null;
+    if (move.flag === 'pawn_double') nextEp = (from + move.to) / 2;
+
+    if (move.captureIdx !== null) {
+      const capEl = document.getElementById(`p${move.captureIdx}`);
+      if (capEl) {
+        capEl.removeAttribute('id');
+        capEl.classList.add('being-captured');
+        capEl.addEventListener('animationend', () => capEl.remove(), { once: true });
+      }
+      setCapturedIdx(move.captureIdx);
+      setTimeout(() => setCapturedIdx(null), 300);
+
+      const captureSound = document.getElementById('capture-sound') as HTMLAudioElement;
+      if (captureSound) {
+        captureSound.currentTime = 0;
+        captureSound.play().catch(e => console.log(e));
+      }
+    }
+
+    setBoardState(prev => {
+      const next = [...prev];
+      if (move.captureIdx !== null) next[move.captureIdx] = null;
+
+      if (move.flag === 'castle_ks') {
+        next[move.to - 1] = next[move.to + 1];
+        next[move.to + 1] = null;
+      } else if (move.flag === 'castle_qs') {
+        next[move.to + 1] = next[move.to - 2];
+        next[move.to - 2] = null;
+      }
+
+      next[move.to] = { ...next[from]!, hasMoved: true };
+      next[from] = null;
+      return next;
+    });
+
+    const checkPromo = (to: number) => {
+      const piece = boardState[from];
+      if (piece && piece.type === 'pawn' && (to < 8 || to >= 56)) {
+        if (gameMode === 'tutorial' || !isPlayer) {
+          setBoardState(prev => {
+            const next = [...prev];
+            next[to] = { ...next[to]!, type: 'queen' };
+            return next;
+          });
+          animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(isPlayer, nextEp); }, 350);
+        } else {
+          animTimerRef.current = setTimeout(() => {
+            setPromotionData({ idx: to, color: piece.color, from });
+            setIsAnimating(false);
+          }, 350);
+        }
+      } else {
+        animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(isPlayer, nextEp); }, 350);
+      }
+    };
+
+    checkPromo(move.to);
+  }, [boardState, gameMode, afterMove]);
 
   const computerMove = useCallback(() => {
     if (gameMode !== 'match' || gameOver) return;
-    const all = getAllMoves('black', boardState);
-    if (all.length === 0) {
-      setGameOver(true);
-      setStatus('컴퓨터가 움직일 곳이 없어요! 아들 승리! 🎉');
-      return;
-    }
+    const allMoves = getAllLegalMoves('black', boardState, epSquare);
+    if (allMoves.length === 0) return;
 
-    let chosen: { from: number; to: number; isCapture: boolean } | null = null;
-
+    let chosen: (Move & { from: number }) | null = null;
     if (gameDiff === 'level1') {
-      chosen = all[Math.floor(Math.random() * all.length)];
+      chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
     } else if (gameDiff === 'level2') {
-      const caps = all.filter(m => m.isCapture);
-      if (caps.length > 0) {
-        const maxV = Math.max(...caps.map(m => VAL[boardState[m.to]!.type] || 0));
-        const best = caps.filter(m => (VAL[boardState[m.to]!.type] || 0) === maxV);
-        chosen = best[Math.floor(Math.random() * best.length)];
-      } else chosen = all[Math.floor(Math.random() * all.length)];
+      const caps = allMoves.filter(m => m.captureIdx !== null);
+      if (caps.length > 0) chosen = caps[Math.floor(Math.random() * caps.length)];
+      else chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
     } else if (gameDiff === 'level3') {
-      const scored = all.map(m => {
-        const capVal = m.isCapture ? (VAL[boardState[m.to]!.type] || 0) : 0;
+      const scored = allMoves.map(m => {
+        const target = boardState[m.captureIdx!];
+        const capVal = target ? (VAL[target.type] || 0) : 0;
         const myVal = VAL[boardState[m.from]!.type] || 0;
-        const pstGain = getPST(boardState[m.from]!, m.to) - getPST(boardState[m.from]!, m.from);
-        const sim = applyMove(boardState, m.from, m.to);
+
+        const undo = applyMoveInPlace(boardState, m);
         let danger = 0;
-        for (let j = 0; j < 64; j++) {
-          if (!sim[j] || sim[j]!.color !== 'white') continue;
-          const { moves: wm, caps: wc } = calcMoves(j, sim);
-          if ([...wm, ...wc].includes(m.to)) {
-            danger = myVal * 0.9;
-            break;
-          }
-        }
-        return { ...m, score: capVal + pstGain * 0.5 - danger };
+        const enemyMoves = getAllLegalMoves('white', boardState, null);
+        if (enemyMoves.some(em => em.captureIdx === m.to)) danger = myVal * 0.9;
+        undoMoveInPlace(boardState, m, undo);
+
+        return { ...m, score: capVal - danger };
       });
       const maxS = Math.max(...scored.map(m => m.score));
       const best = scored.filter(m => m.score === maxS);
       chosen = best[Math.floor(Math.random() * best.length)];
-    } else if (gameDiff === 'level4') {
-      chosen = bestMove(2);
-    } else if (gameDiff === 'level5') {
-      chosen = bestMove(3);
+    } else {
+      const depth = gameDiff === 'level4' ? 2 : 3;
+      let bestScore = -Infinity;
+      let cands: (Move & { from: number })[] = [];
+
+      // Move Ordering 최적화 적용
+      allMoves.sort((a, b) => {
+        const va = a.captureIdx !== null ? (VAL[boardState[a.captureIdx!]?.type] || 0) : 0;
+        const vb = b.captureIdx !== null ? (VAL[boardState[b.captureIdx!]?.type] || 0) : 0;
+        return vb - va;
+      });
+
+      for (const m of allMoves) {
+        const undo = applyMoveInPlace(boardState, m);
+        const s = minimax(boardState, depth - 1, false, -Infinity, Infinity, undo.newEp);
+        undoMoveInPlace(boardState, m, undo);
+        if (s > bestScore) {
+          bestScore = s;
+          cands = [m];
+        } else if (s === bestScore) {
+          cands.push(m);
+        }
+      }
+      chosen = cands[Math.floor(Math.random() * cands.length)];
     }
 
-    if (!chosen) chosen = all[Math.floor(Math.random() * all.length)];
-    
-    const { from, to, isCapture } = chosen;
-    if (isCapture) {
-      setIsAnimating(true);
-      const targetData = boardState[to];
-      setCapturedIdx(to);
-      setTimeout(() => {
-        setBoardState(prev => {
-          const next = [...prev];
-          next[to] = next[from];
-          next[from] = null;
-          return next;
-        });
-        setCapturedIdx(null);
-        setIsAnimating(false);
-        afterMove(from, to, false, targetData);
-      }, 320);
-    } else {
-      setIsAnimating(true);
-      setBoardState(prev => {
-        const next = [...prev];
-        next[to] = next[from];
-        next[from] = null;
-        return next;
-      });
-      setTimeout(() => {
-        setIsAnimating(false);
-        afterMove(from, to, false, null);
-      }, 250);
-    }
-  }, [boardState, gameDiff, gameMode, gameOver, getAllMoves, bestMove, afterMove, calcMoves]);
+    if (chosen) executeRealMove(chosen.from, chosen, false);
+  }, [boardState, epSquare, gameDiff, gameMode, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax, executeRealMove]);
 
   useEffect(() => {
     if (turn === 'black' && !gameOver && !isAnimating) {
-      const timer = setTimeout(computerMove, 700);
-      return () => clearTimeout(timer);
+      aiTimerRef.current = setTimeout(computerMove, 700);
+      return () => { if (aiTimerRef.current) clearTimeout(aiTimerRef.current); };
     }
   }, [turn, gameOver, isAnimating, computerMove]);
 
@@ -517,96 +724,18 @@ export default function App() {
     if (selIdx !== null) {
       if (idx === selIdx) {
         setSelIdx(null);
-        setMoveCells([]);
-        setCapCells([]);
+        setValidMoves([]);
         return;
       }
       if (clicked && clicked.color === boardState[selIdx]!.color) {
         setSelIdx(idx);
-        const { moves, caps } = calcMoves(idx, boardState);
-        setMoveCells(moves);
-        setCapCells(caps);
+        setValidMoves(getLegalMoves(idx, boardState, epSquare));
         return;
       }
 
-      if (moveCells.includes(idx)) {
-        const from = selIdx;
-        const to = idx;
-        const piece = boardState[from]!;
-        const isPromoRank = to < 8 || to >= 56;
-
-        if (piece.type === 'pawn' && isPromoRank) {
-          if (gameMode === 'tutorial') {
-            setBoardState(prev => {
-              const next = [...prev];
-              next[to] = { ...piece, type: 'queen' };
-              next[from] = null;
-              return next;
-            });
-            setSelIdx(null);
-            setMoveCells([]);
-            setCapCells([]);
-            afterMove(from, to, true, null);
-          } else {
-            setPromotionData({ idx: to, color: piece.color, from, captured: null });
-          }
-        } else {
-          setBoardState(prev => {
-            const next = [...prev];
-            next[to] = next[from];
-            next[from] = null;
-            return next;
-          });
-          setSelIdx(null);
-          setMoveCells([]);
-          setCapCells([]);
-          afterMove(from, to, true, null);
-        }
-      } else if (capCells.includes(idx)) {
-        const from = selIdx;
-        const to = idx;
-        const piece = boardState[from]!;
-        const targetData = boardState[to];
-        const isPromoRank = to < 8 || to >= 56;
-
-        if (piece.type === 'pawn' && isPromoRank) {
-          if (gameMode === 'tutorial') {
-            setCapturedIdx(to);
-            setTimeout(() => {
-              setBoardState(prev => {
-                const next = [...prev];
-                next[to] = { ...piece, type: 'queen' };
-                next[from] = null;
-                return next;
-              });
-              setCapturedIdx(null);
-              setSelIdx(null);
-              setMoveCells([]);
-              setCapCells([]);
-              afterMove(from, to, true, targetData);
-            }, 320);
-          } else {
-            setPromotionData({ idx: to, color: piece.color, from, captured: targetData });
-          }
-        } else {
-          setCapturedIdx(to);
-          setTimeout(() => {
-            setBoardState(prev => {
-              const next = [...prev];
-              next[to] = next[from];
-              next[from] = null;
-              return next;
-            });
-            setCapturedIdx(null);
-            setSelIdx(null);
-            setMoveCells([]);
-            setCapCells([]);
-            afterMove(from, to, true, targetData);
-          }, 320);
-        }
-      } else {
-        setStatus('거긴 못 가! 초록 불빛을 눌러!');
-      }
+      const move = validMoves.find(m => m.to === idx);
+      if (move) executeRealMove(selIdx, move, true);
+      else setStatus('거긴 못 가! 초록 불빛이나 빨간 마커를 눌러!');
     } else {
       if (!clicked) return;
       if (gameMode === 'match' && clicked.color !== 'white') {
@@ -614,27 +743,21 @@ export default function App() {
         return;
       }
       setSelIdx(idx);
-      const { moves, caps } = calcMoves(idx, boardState);
-      setMoveCells(moves);
-      setCapCells(caps);
-      setStatus(gameMode === 'tutorial' ? clicked.desc : '어디로 이동할까요?');
+      setValidMoves(getLegalMoves(idx, boardState, epSquare));
+      setStatus(gameMode === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
     }
   };
 
   const handlePromotion = (type: PieceType) => {
     if (!promotionData) return;
-    const { idx, color, from, captured } = promotionData;
+    const { idx, color } = promotionData;
     setBoardState(prev => {
       const next = [...prev];
-      next[idx] = { type, color, desc: DESC[color][type] };
-      next[from] = null;
+      next[idx] = { type, color, hasMoved: true };
       return next;
     });
     setPromotionData(null);
-    setSelIdx(null);
-    setMoveCells([]);
-    setCapCells([]);
-    afterMove(from, idx, true, captured);
+    afterMove(true, null);
   };
 
   const startTutorial = () => {
@@ -642,9 +765,10 @@ export default function App() {
     setGameOver(false);
     setIsAnimating(false);
     setTurn('');
+    setEpSquare(null);
     setShowMenu(false);
     setBoardState(makeSetup());
-    setStatus('연습 모드! 하얀 팀·검은 팀 모두 만져볼 수 있어!');
+    setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
   const startMatch = (diff: string) => {
@@ -653,20 +777,31 @@ export default function App() {
     setGameOver(false);
     setIsAnimating(false);
     setTurn('white');
+    setEpSquare(null);
     setShowMenu(false);
     setBoardState(makeSetup());
     setStatus('컴퓨터 대결 시작! 아들 차례 — 하얀 말을 먼저 움직여!');
   };
 
   const handleHomeClick = () => {
-    if (window.confirm("진행 중인 게임이 초기화됩니다. 처음 메뉴로 돌아가시겠습니까?")) {
+    if (gameMode === '' || gameMode === 'menu') return;
+    setShowConfirm(true);
+  };
+
+  const confirmHome = (yes: boolean) => {
+    setShowConfirm(false);
+    if (yes) {
+      if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+      if (animTimerRef.current) clearTimeout(animTimerRef.current);
       setShowMenu(true);
       setShowDiffOptions(false);
       setGameOver(true);
+      setGameMode('menu');
+      setIsAnimating(false);
       setStatus('모드를 골라주세요!');
       setSelIdx(null);
-      setMoveCells([]);
-      setCapCells([]);
+      setValidMoves([]);
+      setPromotionData(null);
     }
   };
 
@@ -685,17 +820,23 @@ export default function App() {
         <button className="bgm-btn" onClick={handleHomeClick} style={{ background: '#ff9800' }}>🏠 메뉴로</button>
       </div>
 
-      <div id="youtube-player" style={{ display: 'none' }}></div>
+      <audio id="capture-sound" src="https://assets.mixkit.co/active_storage/sfx/3005/3005-preview.mp3" preload="auto"></audio>
+      <div id="youtube-player" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}></div>
 
       <div className="board-wrap">
         <div className="board">
-          {Array.from({ length: 64 }).map((_, i) => (
-            <div
-              key={i}
-              className={`sq ${(Math.floor(i / 8) + (i % 8)) % 2 === 0 ? 'light' : 'dark'} ${moveCells.includes(i) ? 'valid' : ''} ${capCells.includes(i) ? 'capture' : ''}`}
-              onClick={() => onSqClick(i)}
-            />
-          ))}
+          {Array.from({ length: 64 }).map((_, i) => {
+            const move = validMoves.find(m => m.to === i);
+            const isKing = boardState[i]?.type === 'king';
+            const isCheck = isKing && isSquareAttacked(i, boardState[i]!.color === 'white' ? 'black' : 'white', boardState);
+            return (
+              <div
+                key={i}
+                className={`sq ${(Math.floor(i / 8) + (i % 8)) % 2 === 0 ? 'light' : 'dark'} ${move ? (move.captureIdx !== null ? 'capture sq-capture' : 'valid') : ''} ${isCheck ? 'check-warning' : ''}`}
+                onClick={() => onSqClick(i)}
+              />
+            );
+          })}
           {boardState.map((d, i) => {
             if (!d) return null;
             const r = Math.floor(i / 8);
@@ -707,7 +848,7 @@ export default function App() {
                 style={{ transform: `translate(calc(var(--sq)*${c}),calc(var(--sq)*${r}))` }}
               >
                 <div className="piece-inner">
-                  {pieceSVG(d.type, d.color)}
+                  <PieceSVG type={d.type} color={d.color} />
                 </div>
               </div>
             );
@@ -746,10 +887,22 @@ export default function App() {
               {(['queen', 'rook', 'bishop', 'knight'] as PieceType[]).map(t => (
                 <button key={t} className="promo-btn" onClick={() => handlePromotion(t)}>
                   <div style={{ width: '100%', height: '100%' }}>
-                    {pieceSVG(t, promotionData.color)}
+                    <PieceSVG type={t} color={promotionData.color} />
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfirm && (
+        <div className="promo-overlay" style={{ zIndex: 999 }}>
+          <div className="promo-box">
+            <div className="promo-title">진행 중인 게임이 사라집니다.<br />처음 메뉴로 돌아갈까요?</div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '2vmin', marginTop: '3vmin' }}>
+              <button className="bgm-btn" style={{ background: '#4caf50', padding: '1.5vmin 3vmin' }} onClick={() => confirmHome(true)}>네, 돌아갈래요</button>
+              <button className="bgm-btn" style={{ background: '#d32f2f', padding: '1.5vmin 3vmin' }} onClick={() => confirmHome(false)}>아니요, 계속할래요</button>
             </div>
           </div>
         </div>
