@@ -400,23 +400,68 @@ export default function App() {
   }, []);
 
   const applyMoveInPlace = useCallback((state: (PieceData | null)[], move: Move & { from: number }) => {
-    const undo = { targetPiece: state[move.to], capPiece: null as PieceData | null, hasMoved: state[move.from]!.hasMoved, promoted: false, newEp: null as number | null };
-    if (move.captureIdx !== null && move.captureIdx !== move.to) { undo.capPiece = state[move.captureIdx]; state[move.captureIdx] = null; }
-    if (move.flag === 'castle_ks') { state[move.to - 1] = state[move.to + 1]; state[move.to + 1] = null; }
-    else if (move.flag === 'castle_qs') { state[move.to + 1] = state[move.to - 2]; state[move.to - 2] = null; }
-    else if (move.flag === 'pawn_double') { undo.newEp = (move.from + move.to) / 2; }
+    const p = state[move.from]!;
+    const undo = {
+      targetPiece: state[move.to],
+      capPiece: null as PieceData | null,
+      hasMoved: p.hasMoved,
+      rookHasMoved: null as boolean | null,
+      promoted: false,
+      newEp: null as number | null
+    };
 
-    state[move.to] = state[move.from]; state[move.from] = null; state[move.to]!.hasMoved = true;
-    if (state[move.to]!.type === 'pawn' && (move.to < 8 || move.to >= 56)) { state[move.to]!.type = 'queen'; undo.promoted = true; }
+    if (move.captureIdx !== null && move.captureIdx !== move.to) {
+      undo.capPiece = state[move.captureIdx];
+      state[move.captureIdx] = null;
+    }
+
+    if (move.flag === 'castle_ks') {
+      const ri = move.to + 1;
+      undo.rookHasMoved = state[ri]?.hasMoved ?? null;
+      state[move.to - 1] = state[ri];
+      state[ri] = null;
+      if (state[move.to - 1]) state[move.to - 1]!.hasMoved = true;
+    } else if (move.flag === 'castle_qs') {
+      const ri = move.to - 2;
+      undo.rookHasMoved = state[ri]?.hasMoved ?? null;
+      state[move.to + 1] = state[ri];
+      state[ri] = null;
+      if (state[move.to + 1]) state[move.to + 1]!.hasMoved = true;
+    } else if (move.flag === 'pawn_double') {
+      undo.newEp = (move.from + move.to) / 2;
+    }
+
+    state[move.to] = p;
+    state[move.from] = null;
+    p.hasMoved = true;
+
+    if (p.type === 'pawn' && (move.to < 8 || move.to >= 56)) {
+      p.type = 'queen';
+      undo.promoted = true;
+    }
     return undo;
   }, []);
 
   const undoMoveInPlace = useCallback((state: (PieceData | null)[], move: Move & { from: number }, undo: any) => {
-    state[move.from] = state[move.to]; state[move.to] = undo.targetPiece; state[move.from]!.hasMoved = undo.hasMoved;
-    if (undo.promoted) { state[move.from]!.type = 'pawn'; }
-    if (move.captureIdx !== null && move.captureIdx !== move.to) { state[move.captureIdx] = undo.capPiece; }
-    if (move.flag === 'castle_ks') { state[move.to + 1] = state[move.to - 1]; state[move.to - 1] = null; }
-    else if (move.flag === 'castle_qs') { state[move.to - 2] = state[move.to + 1]; state[move.to + 1] = null; }
+    const p = state[move.to]!;
+    if (undo.promoted) p.type = 'pawn';
+    state[move.from] = p;
+    state[move.to] = undo.targetPiece;
+    p.hasMoved = undo.hasMoved;
+
+    if (move.captureIdx !== null && move.captureIdx !== move.to) {
+      state[move.captureIdx] = undo.capPiece;
+    }
+
+    if (move.flag === 'castle_ks') {
+      state[move.to + 1] = state[move.to - 1];
+      state[move.to - 1] = null;
+      if (state[move.to + 1]) state[move.to + 1]!.hasMoved = undo.rookHasMoved;
+    } else if (move.flag === 'castle_qs') {
+      state[move.to - 2] = state[move.to + 1];
+      state[move.to + 1] = null;
+      if (state[move.to - 2]) state[move.to - 2]!.hasMoved = undo.rookHasMoved;
+    }
   }, []);
 
   const getLegalMoves = useCallback((idx: number, state: (PieceData | null)[], currentEpSq: number | null) => {
@@ -491,19 +536,24 @@ export default function App() {
     return { sim, newEp };
   }, []);
 
+  const getPST = useCallback((piece: PieceData, idx: number) => {
+    const tbl = PST[piece.type];
+    if (!tbl) return 0;
+    const r = Math.floor(idx / 8);
+    const c = idx % 8;
+    return piece.color === 'white' ? tbl[idx] : tbl[(7 - r) * 8 + c];
+  }, []);
+
   const evaluate = useCallback((state: (PieceData | null)[]) => {
     let score = 0;
     for (let i = 0; i < 64; i++) {
       if (!state[i]) continue;
       const p = state[i]!;
-      const r = Math.floor(i / 8);
-      const c = i % 8;
-      const pstVal = PST[p.type] ? (p.color === 'white' ? PST[p.type][i] : PST[p.type][(7 - r) * 8 + c]) : 0;
-      const v = VAL[p.type] + pstVal;
+      const v = VAL[p.type] + getPST(p, i);
       score += p.color === 'black' ? v : -v;
     }
     return score;
-  }, []);
+  }, [getPST]);
 
   const minimax = useCallback((state: (PieceData | null)[], depth: number, isMax: boolean, alpha: number, beta: number, currentEp: number | null): number => {
     const color = isMax ? 'black' : 'white';
@@ -671,63 +721,75 @@ export default function App() {
     checkPromo(move.to);
   }, [boardState, gameMode, afterMove]);
 
+  const bestMoveWithMinimax = useCallback((depth: number) => {
+    const all = getAllLegalMoves('black', boardState, epSquare);
+    if (!all.length) return null;
+    all.sort((a, b) => (b.captureIdx !== null ? (VAL[boardState[b.captureIdx!]?.type] || 0) : 0) - (a.captureIdx !== null ? (VAL[boardState[a.captureIdx!]?.type] || 0) : 0));
+    let bestScore = -Infinity;
+    let cands: (Move & { from: number })[] = [];
+    for (const m of all) {
+      const undo = applyMoveInPlace(boardState, m);
+      const s = minimax(boardState, depth - 1, false, -Infinity, Infinity, undo.newEp);
+      undoMoveInPlace(boardState, m, undo);
+      if (s > bestScore) {
+        bestScore = s;
+        cands = [m];
+      } else if (s === bestScore) {
+        cands.push(m);
+      }
+    }
+    return cands[Math.floor(Math.random() * cands.length)] || null;
+  }, [boardState, epSquare, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax]);
+
   const computerMove = useCallback(() => {
     if (gameMode !== 'match' || gameOver) return;
     const allMoves = getAllLegalMoves('black', boardState, epSquare);
-    if (allMoves.length === 0) return;
+    if (allMoves.length === 0) {
+      setGameOver(true);
+      setStatus('컴퓨터가 움직일 곳이 없어요! 마스터 승리! 🎉');
+      return;
+    }
 
     let chosen: (Move & { from: number }) | null = null;
     if (gameDiff === 'level1') {
       chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
     } else if (gameDiff === 'level2') {
       const caps = allMoves.filter(m => m.captureIdx !== null);
-      if (caps.length > 0) chosen = caps[Math.floor(Math.random() * caps.length)];
-      else chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
+      if (caps.length > 0) {
+        const maxV = Math.max(...caps.map(m => VAL[boardState[m.captureIdx!]?.type] || 0));
+        const best = caps.filter(m => (VAL[boardState[m.captureIdx!]?.type] || 0) === maxV);
+        chosen = best[Math.floor(Math.random() * best.length)];
+      } else {
+        chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
+      }
     } else if (gameDiff === 'level3') {
       const scored = allMoves.map(m => {
-        const target = boardState[m.captureIdx!];
+        const target = m.captureIdx !== null ? boardState[m.captureIdx] : null;
+        const mover = boardState[m.from]!;
         const capVal = target ? (VAL[target.type] || 0) : 0;
-        const myVal = VAL[boardState[m.from]!.type] || 0;
+        const myVal = VAL[mover.type] || 0;
+        const pstGain = getPST(mover, m.to) - getPST(mover, m.from);
 
         const undo = applyMoveInPlace(boardState, m);
         let danger = 0;
-        const enemyMoves = getAllLegalMoves('white', boardState, null);
-        if (enemyMoves.some(em => em.captureIdx === m.to)) danger = myVal * 0.9;
+        const enemyMoves = getAllLegalMoves('white', boardState, undo.newEp);
+        if (enemyMoves.some(em => em.to === m.to)) danger = myVal * 0.9;
         undoMoveInPlace(boardState, m, undo);
 
-        return { ...m, score: capVal - danger };
+        return { ...m, score: capVal + pstGain * 0.5 - danger };
       });
       const maxS = Math.max(...scored.map(m => m.score));
       const best = scored.filter(m => m.score === maxS);
       chosen = best[Math.floor(Math.random() * best.length)];
-    } else {
-      const depth = gameDiff === 'level4' ? 2 : 3;
-      let bestScore = -Infinity;
-      let cands: (Move & { from: number })[] = [];
-
-      // Move Ordering 최적화 적용
-      allMoves.sort((a, b) => {
-        const va = a.captureIdx !== null ? (VAL[boardState[a.captureIdx!]?.type] || 0) : 0;
-        const vb = b.captureIdx !== null ? (VAL[boardState[b.captureIdx!]?.type] || 0) : 0;
-        return vb - va;
-      });
-
-      for (const m of allMoves) {
-        const undo = applyMoveInPlace(boardState, m);
-        const s = minimax(boardState, depth - 1, false, -Infinity, Infinity, undo.newEp);
-        undoMoveInPlace(boardState, m, undo);
-        if (s > bestScore) {
-          bestScore = s;
-          cands = [m];
-        } else if (s === bestScore) {
-          cands.push(m);
-        }
-      }
-      chosen = cands[Math.floor(Math.random() * cands.length)];
+    } else if (gameDiff === 'level4') {
+      chosen = bestMoveWithMinimax(2);
+    } else if (gameDiff === 'level5') {
+      chosen = bestMoveWithMinimax(3);
     }
 
-    if (chosen) executeRealMove(chosen.from, chosen, false);
-  }, [boardState, epSquare, gameDiff, gameMode, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax, executeRealMove]);
+    if (!chosen) chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
+    executeRealMove(chosen.from, chosen, false);
+  }, [boardState, epSquare, gameDiff, gameMode, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax, executeRealMove, getPST, bestMoveWithMinimax]);
 
   useEffect(() => {
     if (turn === 'black' && !gameOver && !isAnimating) {
@@ -795,18 +857,6 @@ export default function App() {
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
-  const startPvP = () => {
-    setGameMode('pvp');
-    setGameDiff('');
-    setGameOver(false);
-    setIsAnimating(false);
-    setTurn('white');
-    setEpSquare(null);
-    setShowMenu(false);
-    setBoardState(makeSetup());
-    setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
-  };
-
   const startMatch = (diff: string) => {
     setGameMode('match');
     setGameDiff(diff);
@@ -817,6 +867,18 @@ export default function App() {
     setShowMenu(false);
     setBoardState(makeSetup());
     setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
+  };
+
+  const startPvP = () => {
+    setGameMode('pvp');
+    setGameDiff('');
+    setGameOver(false);
+    setIsAnimating(false);
+    setTurn('white');
+    setEpSquare(null);
+    setShowMenu(false);
+    setBoardState(makeSetup());
+    setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
   };
 
   const handleHomeClick = () => {
@@ -860,7 +922,7 @@ export default function App() {
       <audio id="checkmate-sound" src="https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3" preload="auto"></audio>
       <div id="youtube-player" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}></div>
 
-      <div className="board-wrap">
+      <div className={`board-wrap ${gameMode === 'pvp' ? 'pvp-mode' : ''}`}>
         <div className="board">
           {Array.from({ length: 64 }).map((_, i) => {
             const move = validMoves.find(m => m.to === i);
@@ -881,7 +943,9 @@ export default function App() {
             return (
               <div
                 key={i}
+                id={`p${i}`}
                 className={`piece ${selIdx === i ? 'selected' : ''} ${capturedIdx === i ? 'being-captured' : ''}`}
+                data-color={d.color}
                 style={{ transform: `translate(calc(var(--sq)*${c}),calc(var(--sq)*${r}))` }}
               >
                 <div className="piece-inner">
@@ -918,7 +982,7 @@ export default function App() {
       <p className="info-box">{status}</p>
 
       {promotionData && (
-        <div className="promo-overlay">
+        <div className={`promo-overlay ${gameMode === 'pvp' && promotionData.color === 'black' ? 'pvp-black' : ''}`}>
           <div className="promo-box">
             <div className="promo-title">🎉 폰 승진! 어떤 말로 바꿀까요?</div>
             <div className="promo-pieces">
