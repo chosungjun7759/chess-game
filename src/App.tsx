@@ -242,7 +242,7 @@ export default function App() {
   const [turn, setTurn] = useState<PieceColor | ''>('');
   const [gameOver, setGameOver] = useState(false);
   const [isAnimating, setIsAnimating] = useState(false);
-  const [gameMode, setGameMode] = useState<'tutorial' | 'match' | 'menu' | ''>('');
+  const [gameMode, setGameMode] = useState<'tutorial' | 'match' | 'pvp' | 'menu' | ''>('');
   const [gameDiff, setGameDiff] = useState<string>('');
   const [showMenu, setShowMenu] = useState(true);
   const [showDiffOptions, setShowDiffOptions] = useState(false);
@@ -437,14 +437,14 @@ export default function App() {
     }
 
     if (p.type === 'king' && !p.hasMoved && !isSquareAttacked(idx, enemyColor, state)) {
-      if (state[idx + 3]?.type === 'rook' && !state[idx + 3]?.hasMoved) {
+      if (state[idx + 3]?.type === 'rook' && state[idx + 3]?.color === p.color && !state[idx + 3]?.hasMoved) {
         if (!state[idx + 1] && !state[idx + 2]) {
           if (!isSquareAttacked(idx + 1, enemyColor, state) && !isSquareAttacked(idx + 2, enemyColor, state)) {
             legal.push({ to: idx + 2, flag: 'castle_ks', captureIdx: null });
           }
         }
       }
-      if (state[idx - 4]?.type === 'rook' && !state[idx - 4]?.hasMoved) {
+      if (state[idx - 4]?.type === 'rook' && state[idx - 4]?.color === p.color && !state[idx - 4]?.hasMoved) {
         if (!state[idx - 1] && !state[idx - 2] && !state[idx - 3]) {
           if (!isSquareAttacked(idx - 1, enemyColor, state) && !isSquareAttacked(idx - 2, enemyColor, state)) {
             legal.push({ to: idx - 2, flag: 'castle_qs', captureIdx: null });
@@ -512,7 +512,8 @@ export default function App() {
     if (moves.length === 0) {
       let kingIdx = -1;
       for (let i = 0; i < 64; i++) { if (state[i]?.type === 'king' && state[i]?.color === color) { kingIdx = i; break; } }
-      if (isSquareAttacked(kingIdx, isMax ? 'white' : 'black', state)) return isMax ? -999999 : 999999;
+      if (kingIdx === -1) return isMax ? -999999 : 999999;
+      if (isSquareAttacked(kingIdx, isMax ? 'white' : 'black', state)) return isMax ? -500000 : 500000;
       return 0;
     }
 
@@ -550,24 +551,40 @@ export default function App() {
     }
   }, [evaluate, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, isSquareAttacked]);
 
-  const afterMove = useCallback((isPlayer: boolean, nextEp: number | null) => {
+  const saveGameResultToFirebase = useCallback((winnerName: string, mode: string, difficulty: string) => {
+    // Firebase logic placeholder
+    console.log('Saving game result:', { winnerName, mode, difficulty, date: new Date().toLocaleString() });
+  }, []);
+
+  const afterMove = useCallback((to: number, isPlayer: boolean, nextEp: number | null) => {
     if (gameMode === 'menu') return;
     setEpSquare(nextEp);
 
-    const nextColor = isPlayer ? 'black' : 'white';
+    const movedColor = boardState[to]!.color;
+    const nextColor = movedColor === 'white' ? 'black' : 'white';
     const myLegalMoves = getAllLegalMoves(nextColor, boardState, nextEp);
 
     if (myLegalMoves.length === 0) {
       let myKingIdx = -1;
       for (let i = 0; i < 64; i++) { if (boardState[i]?.type === 'king' && boardState[i]?.color === nextColor) { myKingIdx = i; break; } }
-      const isCheck = isSquareAttacked(myKingIdx, isPlayer ? 'white' : 'black', boardState);
+      const isCheck = isSquareAttacked(myKingIdx, movedColor, boardState);
 
       setGameOver(true);
       if (isCheck) {
-        const winner = isPlayer ? '하얀 팀(아들)' : '검은 팀(컴퓨터)';
-        setStatus(`🎉 체크메이트! ${winner} 승리! 🎉`);
+        const checkmateSound = document.getElementById('checkmate-sound') as HTMLAudioElement;
+        if (checkmateSound) {
+          checkmateSound.currentTime = 0;
+          checkmateSound.play().catch(e => console.log(e));
+        }
+        let winnerText = movedColor === 'white' ? '하얀 팀' : '검은 팀';
+        if (gameMode === 'match') {
+          winnerText = movedColor === 'white' ? '하얀 팀(마스터)' : '검은 팀(컴퓨터)';
+        }
+        setStatus(`🎉 체크메이트! ${winnerText} 승리! 🎉`);
+        saveGameResultToFirebase(winnerText, gameMode, gameDiff);
       } else {
         setStatus(`🤝 스테일메이트! 무승부입니다.`);
+        saveGameResultToFirebase('무승부', gameMode, gameDiff);
       }
       return;
     }
@@ -580,6 +597,9 @@ export default function App() {
         setTurn('white');
         setStatus('아들 차례! 멋지게 공격해봐요!');
       }
+    } else if (gameMode === 'pvp') {
+      setTurn(nextColor);
+      setStatus(nextColor === 'white' ? '하얀 팀 차례! 멋지게 공격해봐요!' : '검은 팀 차례! 멋지게 반격해봐요!');
     } else {
       setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
     }
@@ -630,13 +650,13 @@ export default function App() {
     const checkPromo = (to: number) => {
       const piece = boardState[from];
       if (piece && piece.type === 'pawn' && (to < 8 || to >= 56)) {
-        if (gameMode === 'tutorial' || !isPlayer) {
+        if (gameMode === 'tutorial' || (!isPlayer && gameMode === 'match')) {
           setBoardState(prev => {
             const next = [...prev];
             next[to] = { ...next[to]!, type: 'queen' };
             return next;
           });
-          animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(isPlayer, nextEp); }, 350);
+          animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(to, isPlayer, nextEp); }, 350);
         } else {
           animTimerRef.current = setTimeout(() => {
             setPromotionData({ idx: to, color: piece.color, from });
@@ -644,7 +664,7 @@ export default function App() {
           }, 350);
         }
       } else {
-        animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(isPlayer, nextEp); }, 350);
+        animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(to, isPlayer, nextEp); }, 350);
       }
     };
 
@@ -735,11 +755,15 @@ export default function App() {
 
       const move = validMoves.find(m => m.to === idx);
       if (move) executeRealMove(selIdx, move, true);
-      else setStatus('거긴 못 가! 초록 불빛이나 빨간 마커를 눌러!');
+      else setStatus('거긴 못 가! 초록색이나 붉은색 타겟을 눌러!');
     } else {
       if (!clicked) return;
       if (gameMode === 'match' && clicked.color !== 'white') {
-        setStatus('아들 차례니까 하얀 말만 움직여!');
+        setStatus('마스터 차례니까 하얀 말만 움직여!');
+        return;
+      }
+      if (gameMode === 'pvp' && clicked.color !== turn) {
+        setStatus(turn === 'white' ? '지금은 하얀 팀 차례야!' : '지금은 검은 팀 차례야!');
         return;
       }
       setSelIdx(idx);
@@ -757,7 +781,7 @@ export default function App() {
       return next;
     });
     setPromotionData(null);
-    afterMove(true, null);
+    afterMove(idx, true, null);
   };
 
   const startTutorial = () => {
@@ -771,6 +795,18 @@ export default function App() {
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
+  const startPvP = () => {
+    setGameMode('pvp');
+    setGameDiff('');
+    setGameOver(false);
+    setIsAnimating(false);
+    setTurn('white');
+    setEpSquare(null);
+    setShowMenu(false);
+    setBoardState(makeSetup());
+    setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
+  };
+
   const startMatch = (diff: string) => {
     setGameMode('match');
     setGameDiff(diff);
@@ -780,7 +816,7 @@ export default function App() {
     setEpSquare(null);
     setShowMenu(false);
     setBoardState(makeSetup());
-    setStatus('컴퓨터 대결 시작! 아들 차례 — 하얀 말을 먼저 움직여!');
+    setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
   };
 
   const handleHomeClick = () => {
@@ -821,6 +857,7 @@ export default function App() {
       </div>
 
       <audio id="capture-sound" src="https://assets.mixkit.co/active_storage/sfx/3005/3005-preview.mp3" preload="auto"></audio>
+      <audio id="checkmate-sound" src="https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3" preload="auto"></audio>
       <div id="youtube-player" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}></div>
 
       <div className="board-wrap">
@@ -861,6 +898,7 @@ export default function App() {
                 <>
                   <button className="menu-btn" onClick={startTutorial}>1. 튜토리얼 (혼자 연습하기)</button>
                   <button className="menu-btn" onClick={() => setShowDiffOptions(true)}>2. 컴퓨터랑 대결하기</button>
+                  <button className="menu-btn" onClick={startPvP} style={{ background: '#4caf50', color: 'white', borderColor: '#388e3c' }}>3. 2인 대결 (친구랑 같이 하기)</button>
                 </>
               ) : (
                 <div className="diff-container" style={{ display: 'flex' }}>
