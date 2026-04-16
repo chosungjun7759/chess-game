@@ -253,6 +253,7 @@ export default function App() {
   const [promotionData, setPromotionData] = useState<{ idx: number; color: PieceColor; from: number } | null>(null);
   const [epSquare, setEpSquare] = useState<number | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [lastMove, setLastMove] = useState<{ from: number; to: number } | null>(null);
 
   const playerRef = useRef<any>(null);
   const aiTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -664,6 +665,8 @@ export default function App() {
     setSelIdx(null);
     setValidMoves([]);
 
+    setLastMove({ from, to: move.to });
+
     let nextEp: number | null = null;
     if (move.flag === 'pawn_double') nextEp = (from + move.to) / 2;
 
@@ -866,6 +869,7 @@ export default function App() {
     setIsAnimating(false);
     setTurn('');
     setEpSquare(null);
+    setLastMove(null);
     setShowMenu(false);
     setBoardState(makeSetup());
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
@@ -878,6 +882,7 @@ export default function App() {
     setIsAnimating(false);
     setTurn('white');
     setEpSquare(null);
+    setLastMove(null);
     setShowMenu(false);
     setBoardState(makeSetup());
     setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
@@ -890,6 +895,7 @@ export default function App() {
     setIsAnimating(false);
     setTurn('white');
     setEpSquare(null);
+    setLastMove(null);
     setShowMenu(false);
     setBoardState(makeSetup());
     setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
@@ -914,6 +920,7 @@ export default function App() {
       setSelIdx(null);
       setValidMoves([]);
       setPromotionData(null);
+      setLastMove(null);
     }
   };
 
@@ -942,10 +949,11 @@ export default function App() {
             const move = validMoves.find(m => m.to === i);
             const isKing = boardState[i]?.type === 'king';
             const isCheck = isKing && isSquareAttacked(i, boardState[i]!.color === 'white' ? 'black' : 'white', boardState);
+            const isLastMove = lastMove && (lastMove.from === i || lastMove.to === i);
             return (
               <div
                 key={i}
-                className={`sq ${(Math.floor(i / 8) + (i % 8)) % 2 === 0 ? 'light' : 'dark'} ${move ? (move.captureIdx !== null ? 'capture sq-capture' : 'valid') : ''} ${isCheck ? 'check-warning' : ''}`}
+                className={`sq ${(Math.floor(i / 8) + (i % 8)) % 2 === 0 ? 'light' : 'dark'} ${move ? (move.captureIdx !== null ? 'capture sq-capture' : 'valid') : ''} ${isCheck ? 'check-warning' : ''} ${isLastMove ? 'last-move' : ''}`}
                 onClick={() => onSqClick(i)}
               />
             );

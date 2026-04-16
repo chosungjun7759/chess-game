@@ -16,6 +16,7 @@ body {
   align-items: center; justify-content: center;
   height: 100dvh;
   font-family: 'Apple SD Gothic Neo', '맑은 고딕', sans-serif;
+  touch-action: manipulation; /* 모바일 더블탭 확대 완벽 방지 */
 }
 
 .container { display: flex; flex-direction: column; align-items: center; width: var(--board-size); }
@@ -71,11 +72,17 @@ body {
 .light { background: var(--board-light); }
 .dark  { background: var(--board-dark); }
 
+/* 🟢 방금 이동한 기물의 흔적 표시 (형광펜 효과) */
+.sq.last-move {
+  background-color: rgba(170, 204, 0, 0.75) !important;
+}
+
 .piece {
   position: absolute; top: 0; left: 0; width: var(--sq); height: var(--sq);
   pointer-events: none; user-select: none; z-index: 10;
   transition: transform .25s ease-in-out; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
+  will-change: transform; /* GPU 가속 발동! 부드러운 60프레임 이동 */
 }
 
 .piece.selected {
