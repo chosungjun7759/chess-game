@@ -405,6 +405,8 @@ export default function App() {
       targetPiece: state[move.to],
       capPiece: null as PieceData | null,
       hasMoved: p.hasMoved,
+      rookFromIdx: null as number | null,
+      rookToIdx: null as number | null,
       rookHasMoved: null as boolean | null,
       promoted: false,
       newEp: null as number | null
@@ -417,13 +419,17 @@ export default function App() {
 
     if (move.flag === 'castle_ks') {
       const ri = move.to + 1;
-      undo.rookHasMoved = state[ri]?.hasMoved ?? null;
+      undo.rookFromIdx = ri;
+      undo.rookToIdx = move.to - 1;
+      undo.rookHasMoved = state[ri]?.hasMoved ?? false;
       state[move.to - 1] = state[ri];
       state[ri] = null;
       if (state[move.to - 1]) state[move.to - 1]!.hasMoved = true;
     } else if (move.flag === 'castle_qs') {
       const ri = move.to - 2;
-      undo.rookHasMoved = state[ri]?.hasMoved ?? null;
+      undo.rookFromIdx = ri;
+      undo.rookToIdx = move.to + 1;
+      undo.rookHasMoved = state[ri]?.hasMoved ?? false;
       state[move.to + 1] = state[ri];
       state[ri] = null;
       if (state[move.to + 1]) state[move.to + 1]!.hasMoved = true;
@@ -453,14 +459,12 @@ export default function App() {
       state[move.captureIdx] = undo.capPiece;
     }
 
-    if (move.flag === 'castle_ks') {
-      state[move.to + 1] = state[move.to - 1];
-      state[move.to - 1] = null;
-      if (state[move.to + 1]) state[move.to + 1]!.hasMoved = undo.rookHasMoved;
-    } else if (move.flag === 'castle_qs') {
-      state[move.to - 2] = state[move.to + 1];
-      state[move.to + 1] = null;
-      if (state[move.to - 2]) state[move.to - 2]!.hasMoved = undo.rookHasMoved;
+    if (move.flag === 'castle_ks' || move.flag === 'castle_qs') {
+      if (undo.rookFromIdx !== null && undo.rookToIdx !== null) {
+        state[undo.rookFromIdx] = state[undo.rookToIdx];
+        state[undo.rookToIdx] = null;
+        if (state[undo.rookFromIdx]) state[undo.rookFromIdx]!.hasMoved = undo.rookHasMoved;
+      }
     }
   }, []);
 
@@ -669,6 +673,8 @@ export default function App() {
         capEl.removeAttribute('id');
         capEl.classList.add('being-captured');
         capEl.addEventListener('animationend', () => capEl.remove(), { once: true });
+        // Bug 3 Fix: Fallback for browsers where animationend might not fire
+        setTimeout(() => { if (capEl.parentNode) capEl.remove(); }, 400);
       }
       setCapturedIdx(move.captureIdx);
       setTimeout(() => setCapturedIdx(null), 300);
@@ -706,15 +712,24 @@ export default function App() {
             next[to] = { ...next[to]!, type: 'queen' };
             return next;
           });
-          animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(to, isPlayer, nextEp); }, 350);
+          animTimerRef.current = setTimeout(() => {
+            if (gameMode === 'menu') return; // Bug 5 Fix
+            setIsAnimating(false);
+            afterMove(to, isPlayer, nextEp);
+          }, 350);
         } else {
           animTimerRef.current = setTimeout(() => {
+            if (gameMode === 'menu') return; // Bug 5 Fix
             setPromotionData({ idx: to, color: piece.color, from });
             setIsAnimating(false);
           }, 350);
         }
       } else {
-        animTimerRef.current = setTimeout(() => { setIsAnimating(false); afterMove(to, isPlayer, nextEp); }, 350);
+        animTimerRef.current = setTimeout(() => {
+          if (gameMode === 'menu') return; // Bug 5 Fix
+          setIsAnimating(false);
+          afterMove(to, isPlayer, nextEp);
+        }, 350);
       }
     };
 
@@ -771,9 +786,8 @@ export default function App() {
         const pstGain = getPST(mover, m.to) - getPST(mover, m.from);
 
         const undo = applyMoveInPlace(boardState, m);
-        let danger = 0;
-        const enemyMoves = getAllLegalMoves('white', boardState, undo.newEp);
-        if (enemyMoves.some(em => em.to === m.to)) danger = myVal * 0.9;
+        // Bug 6 Fix: Use isSquareAttacked for faster danger check O(n)
+        const danger = isSquareAttacked(m.to, 'white', boardState) ? myVal * 0.9 : 0;
         undoMoveInPlace(boardState, m, undo);
 
         return { ...m, score: capVal + pstGain * 0.5 - danger };
