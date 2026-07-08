@@ -9,6 +9,7 @@ type PieceType = 'pawn' | 'rook' | 'knight' | 'bishop' | 'queen' | 'king';
 type PieceColor = 'white' | 'black';
 
 interface PieceData {
+  id: number;
   type: PieceType;
   color: PieceColor;
   hasMoved: boolean;
@@ -105,9 +106,25 @@ const DESC: Record<PieceColor, Record<PieceType, string>> = {
   }
 };
 
-function PieceSVG({ type, color }: { type: PieceType; color: PieceColor }) {
+// PvP 대면(face-to-face) 모드 및 애니메이션 보강 스타일
+const EXTRA_CSS = `
+.piece { transition: transform 0.32s ease; }
+.being-captured { pointer-events: none; }
+.being-captured .piece-inner { animation: capShrink 0.3s ease forwards; }
+@keyframes capShrink { to { opacity: 0; transform: scale(0.2) rotate(25deg); } }
+/* 2인 대결: 검은 팀 말은 맞은편 플레이어가 바로 보도록 180도 회전 */
+.pvp-mode .piece[data-color="black"] .piece-inner { transform: rotate(180deg); }
+.pvp-mode .being-captured[data-color="black"] .piece-inner { animation: capShrinkB 0.3s ease forwards; }
+@keyframes capShrinkB { from { transform: rotate(180deg); } to { opacity: 0; transform: scale(0.2) rotate(205deg); } }
+/* 검은 팀 승진 선택창 회전 */
+.promo-overlay.pvp-black .promo-box { transform: rotate(180deg); }
+/* 검은 팀 쪽(보드 위) 상태창 회전 */
+.info-box.pvp-top { transform: rotate(180deg); margin: 0 0 0.6vh 0; }
+`;
+
+function PieceSVG({ type, color, uid }: { type: PieceType; color: PieceColor; uid: string }) {
   const isW = color === 'white';
-  const p = isW ? 'W' : 'B';
+  const p = (isW ? 'W' : 'B') + uid;
   const [b1, b2, b3] = isW ? ['#fffef5', '#d8c8a8', '#9a8060'] : ['#8a6238', '#2e1a0c', '#0e0806'];
   const [s1, s2] = isW ? ['#d0b888', '#7a5c38'] : ['#402010', '#100806'];
   const ol = isW ? '#3a2410' : '#d8a850';
@@ -229,9 +246,10 @@ function PieceSVG({ type, color }: { type: PieceType; color: PieceColor }) {
 }
 
 function makeSetup(): (PieceData | null)[] {
-  const row = (color: PieceColor, type: PieceType) => ({ type, color, hasMoved: false });
-  const pawns = (c: PieceColor) => Array(8).fill(null).map(() => row(c, 'pawn'));
-  const back = (c: PieceColor) => (['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'] as PieceType[]).map(t => row(c, t));
+  let uid = 0;
+  const mk = (color: PieceColor, type: PieceType): PieceData => ({ id: ++uid, type, color, hasMoved: false });
+  const pawns = (c: PieceColor) => Array.from({ length: 8 }, () => mk(c, 'pawn'));
+  const back = (c: PieceColor) => (['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'] as PieceType[]).map(t => mk(c, t));
   return [...back('black'), ...pawns('black'), ...Array(32).fill(null), ...pawns('white'), ...back('white')];
 }
 
@@ -249,27 +267,30 @@ export default function App() {
   const [status, setStatus] = useState('모드를 골라주세요!');
   const [bgmOn, setBgmOn] = useState(false);
   const [bgmId, setBgmId] = useState('iQIkgz9P-nM');
-  const [capturedIdx, setCapturedIdx] = useState<number | null>(null);
+  const [dying, setDying] = useState<{ piece: PieceData; idx: number } | null>(null);
   const [promotionData, setPromotionData] = useState<{ idx: number; color: PieceColor; from: number } | null>(null);
   const [epSquare, setEpSquare] = useState<number | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [lastMove, setLastMove] = useState<{ from: number; to: number } | null>(null);
 
   const playerRef = useRef<any>(null);
-  const aiTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const animTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dyingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gameModeRef = useRef(gameMode);
+
+  useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
   const fitBoard = useCallback(() => {
     const root = document.documentElement;
     const title = document.querySelector('.game-title') as HTMLElement;
     const ctrls = document.querySelector('.music-controls') as HTMLElement;
-    const info = document.querySelector('.info-box') as HTMLElement;
-
     const titleR = title ? title.getBoundingClientRect() : { height: 0 };
     const ctrlsR = ctrls ? ctrls.getBoundingClientRect() : { height: 0 };
-    const infoR = info ? info.getBoundingClientRect() : { height: 0 };
-
-    const uiH = (titleR.height + ctrlsR.height + infoR.height) + 48;
+    // 상태창은 PvP 대면 모드에서 위/아래 2개가 될 수 있으므로 전부 합산
+    let infoH = 0;
+    document.querySelectorAll('.info-box').forEach(el => { infoH += (el as HTMLElement).getBoundingClientRect().height; });
+    const uiH = titleR.height + ctrlsR.height + infoH + 48;
     const size = Math.max(120, Math.min(Math.floor(window.innerWidth * 0.97), Math.floor(window.innerHeight - uiH)));
     root.style.setProperty('--board-size', size + 'px');
   }, []);
@@ -280,15 +301,11 @@ export default function App() {
     return () => window.removeEventListener('resize', fitBoard);
   }, [fitBoard]);
 
-  useEffect(() => {
-    if (!(window as any).YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
-    }
+  // PvP 진입/이탈 시 상태창 개수가 달라지므로 보드 크기 재계산
+  useEffect(() => { fitBoard(); }, [gameMode, showMenu, fitBoard]);
 
-    (window as any).onYouTubeIframeAPIReady = () => {
+  useEffect(() => {
+    const createPlayer = () => {
       playerRef.current = new (window as any).YT.Player('youtube-player', {
         height: '1',
         width: '1',
@@ -297,7 +314,28 @@ export default function App() {
         playerVars: { autoplay: 0, loop: 1, playlist: bgmId, playsinline: 1 }
       });
     };
+    // API가 이미 로드된 상태(재마운트 등)면 즉시 생성, 아니면 콜백 등록
+    if ((window as any).YT && (window as any).YT.Player) {
+      createPlayer();
+    } else {
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        const firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
+      }
+      (window as any).onYouTubeIframeAPIReady = createPlayer;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const playSound = (elId: string) => {
+    const el = document.getElementById(elId) as HTMLAudioElement | null;
+    if (el) {
+      el.currentTime = 0;
+      el.play().catch(() => {});
+    }
+  };
 
   const toggleBGM = () => {
     if (!playerRef.current || typeof playerRef.current.playVideo !== 'function') return;
@@ -516,31 +554,6 @@ export default function App() {
     return all;
   }, [getLegalMoves]);
 
-  const simulateMove = useCallback((state: (PieceData | null)[], move: Move & { from: number }) => {
-    const sim = state.map(x => x ? { ...x } : null);
-    let newEp: number | null = null;
-    if (move.captureIdx !== null) sim[move.captureIdx] = null;
-
-    if (move.flag === 'castle_ks') {
-      sim[move.to - 1] = sim[move.to + 1];
-      sim[move.to + 1] = null;
-    } else if (move.flag === 'castle_qs') {
-      sim[move.to + 1] = sim[move.to - 2];
-      sim[move.to - 2] = null;
-    } else if (move.flag === 'pawn_double') {
-      newEp = (move.from + move.to) / 2;
-    }
-
-    sim[move.to] = sim[move.from];
-    sim[move.from] = null;
-    sim[move.to]!.hasMoved = true;
-
-    if (sim[move.to]!.type === 'pawn' && (move.to < 8 || move.to >= 56)) {
-      sim[move.to]!.type = 'queen';
-    }
-    return { sim, newEp };
-  }, []);
-
   const getPST = useCallback((piece: PieceData, idx: number) => {
     const tbl = PST[piece.type];
     if (!tbl) return 0;
@@ -561,7 +574,7 @@ export default function App() {
   }, [getPST]);
 
   const minimax = useCallback((state: (PieceData | null)[], depth: number, isMax: boolean, alpha: number, beta: number, currentEp: number | null): number => {
-    const color = isMax ? 'black' : 'white';
+    const color: PieceColor = isMax ? 'black' : 'white';
     const moves = getAllLegalMoves(color, state, currentEp);
 
     if (moves.length === 0) {
@@ -574,10 +587,10 @@ export default function App() {
 
     if (depth === 0) return evaluate(state);
 
-    // 🟢 Move Ordering: 비싼 말을 잡아먹는 수부터 먼저 계산하여 속도 향상
+    // Move Ordering: 비싼 말을 잡는 수부터 먼저 계산하여 가지치기 효율 향상
     moves.sort((a, b) => {
-      const va = a.captureIdx !== null ? (VAL[state[a.captureIdx!]?.type] || 0) : 0;
-      const vb = b.captureIdx !== null ? (VAL[state[b.captureIdx!]?.type] || 0) : 0;
+      const va = a.captureIdx !== null ? (VAL[state[a.captureIdx]!.type] || 0) : 0;
+      const vb = b.captureIdx !== null ? (VAL[state[b.captureIdx]!.type] || 0) : 0;
       return vb - va;
     });
 
@@ -611,13 +624,14 @@ export default function App() {
     console.log('Saving game result:', { winnerName, mode, difficulty, date: new Date().toLocaleString() });
   }, []);
 
-  const afterMove = useCallback((to: number, isPlayer: boolean, nextEp: number | null) => {
-    if (gameMode === 'menu') return;
+  // [핵심 수정] stale closure 제거: 항상 '이동이 반영된 보드'를 인자로 받는다
+  const afterMove = useCallback((board: (PieceData | null)[], to: number, isPlayer: boolean, nextEp: number | null) => {
+    if (gameModeRef.current === 'menu') return;
     setEpSquare(nextEp);
 
     const movedColor = boardState[to]!.color;
     const nextColor = movedColor === 'white' ? 'black' : 'white';
-    const myLegalMoves = getAllLegalMoves(nextColor, boardState, nextEp);
+    const myLegalMoves = getAllLegalMoves(nextColor, boardState, epSquare);
 
     if (myLegalMoves.length === 0) {
       let myKingIdx = -1;
@@ -626,25 +640,21 @@ export default function App() {
 
       setGameOver(true);
       if (isCheck) {
-        const checkmateSound = document.getElementById('checkmate-sound') as HTMLAudioElement;
-        if (checkmateSound) {
-          checkmateSound.currentTime = 0;
-          checkmateSound.play().catch(e => console.log(e));
-        }
+        playSound('checkmate-sound');
         let winnerText = movedColor === 'white' ? '하얀 팀' : '검은 팀';
-        if (gameMode === 'match') {
+        if (gameModeRef.current === 'match') {
           winnerText = movedColor === 'white' ? '하얀 팀(마스터)' : '검은 팀(컴퓨터)';
         }
         setStatus(`🎉 체크메이트! ${winnerText} 승리! 🎉`);
-        saveGameResultToFirebase(winnerText, gameMode, gameDiff);
+        saveGameResultToFirebase(winnerText, gameModeRef.current, gameDiff);
       } else {
         setStatus(`🤝 스테일메이트! 무승부입니다.`);
-        saveGameResultToFirebase('무승부', gameMode, gameDiff);
+        saveGameResultToFirebase('무승부', gameModeRef.current, gameDiff);
       }
       return;
     }
 
-    if (gameMode === 'match') {
+    if (gameModeRef.current === 'match') {
       if (isPlayer) {
         setTurn('black');
         setStatus('컴퓨터 로봇이 생각 중... 🤔');
@@ -652,13 +662,13 @@ export default function App() {
         setTurn('white');
         setStatus('아들 차례! 멋지게 공격해봐요!');
       }
-    } else if (gameMode === 'pvp') {
+    } else if (gameModeRef.current === 'pvp') {
       setTurn(nextColor);
       setStatus(nextColor === 'white' ? '하얀 팀 차례! 멋지게 공격해봐요!' : '검은 팀 차례! 멋지게 반격해봐요!');
     } else {
       setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
     }
-  }, [boardState, gameMode, getAllLegalMoves, isSquareAttacked]);
+  }, [boardState, epSquare, gameDiff, getAllLegalMoves, isSquareAttacked, saveGameResultToFirebase]);
 
   const executeRealMove = useCallback((from: number, move: Move, isPlayer: boolean) => {
     setIsAnimating(true);
@@ -671,22 +681,10 @@ export default function App() {
     if (move.flag === 'pawn_double') nextEp = (from + move.to) / 2;
 
     if (move.captureIdx !== null) {
-      const capEl = document.getElementById(`p${move.captureIdx}`);
-      if (capEl) {
-        capEl.removeAttribute('id');
-        capEl.classList.add('being-captured');
-        capEl.addEventListener('animationend', () => capEl.remove(), { once: true });
-        // Bug 3 Fix: Fallback for browsers where animationend might not fire
-        setTimeout(() => { if (capEl.parentNode) capEl.remove(); }, 400);
-      }
-      setCapturedIdx(move.captureIdx);
-      setTimeout(() => setCapturedIdx(null), 300);
-
-      const captureSound = document.getElementById('capture-sound') as HTMLAudioElement;
-      if (captureSound) {
-        captureSound.currentTime = 0;
-        captureSound.play().catch(e => console.log(e));
-      }
+      setDying({ piece: boardState[move.captureIdx]!, idx: move.captureIdx });
+      if (dyingTimerRef.current) clearTimeout(dyingTimerRef.current);
+      dyingTimerRef.current = setTimeout(() => setDying(null), 300);
+      playSound('capture-sound');
     }
 
     setBoardState(prev => {
@@ -709,27 +707,27 @@ export default function App() {
     const checkPromo = (to: number) => {
       const piece = boardState[from];
       if (piece && piece.type === 'pawn' && (to < 8 || to >= 56)) {
-        if (gameMode === 'tutorial' || (!isPlayer && gameMode === 'match')) {
+        if (gameModeRef.current === 'tutorial' || (!isPlayer && gameModeRef.current === 'match')) {
           setBoardState(prev => {
             const next = [...prev];
             next[to] = { ...next[to]!, type: 'queen' };
             return next;
           });
           animTimerRef.current = setTimeout(() => {
-            if (gameMode === 'menu') return; // Bug 5 Fix
+            if (gameModeRef.current === 'menu') return; // Bug 5 Fix
             setIsAnimating(false);
             afterMove(to, isPlayer, nextEp);
           }, 350);
         } else {
           animTimerRef.current = setTimeout(() => {
-            if (gameMode === 'menu') return; // Bug 5 Fix
+            if (gameModeRef.current === 'menu') return; // Bug 5 Fix
             setPromotionData({ idx: to, color: piece.color, from });
             setIsAnimating(false);
           }, 350);
         }
       } else {
         animTimerRef.current = setTimeout(() => {
-          if (gameMode === 'menu') return; // Bug 5 Fix
+          if (gameModeRef.current === 'menu') return; // Bug 5 Fix
           setIsAnimating(false);
           afterMove(to, isPlayer, nextEp);
         }, 350);
@@ -737,7 +735,7 @@ export default function App() {
     };
 
     checkPromo(move.to);
-  }, [boardState, gameMode, afterMove]);
+  }, [boardState, afterMove]);
 
   const bestMoveWithMinimax = useCallback((depth: number) => {
     const all = getAllLegalMoves('black', boardState, epSquare);
@@ -760,7 +758,7 @@ export default function App() {
   }, [boardState, epSquare, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax]);
 
   const computerMove = useCallback(() => {
-    if (gameMode !== 'match' || gameOver) return;
+    if (gameModeRef.current !== 'match' || gameOver) return;
     const allMoves = getAllLegalMoves('black', boardState, epSquare);
     if (allMoves.length === 0) {
       setGameOver(true);
@@ -806,7 +804,7 @@ export default function App() {
 
     if (!chosen) chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
     executeRealMove(chosen.from, chosen, false);
-  }, [boardState, epSquare, gameDiff, gameMode, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax, executeRealMove, getPST, bestMoveWithMinimax]);
+  }, [boardState, epSquare, gameDiff, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, executeRealMove, getPST, bestMoveWithMinimax, isSquareAttacked]);
 
   useEffect(() => {
     if (turn === 'black' && !gameOver && !isAnimating) {
@@ -817,7 +815,7 @@ export default function App() {
 
   const onSqClick = (idx: number) => {
     if (gameOver || isAnimating || promotionData) return;
-    if (gameMode === 'match' && turn !== 'white') return;
+    if (gameModeRef.current === 'match' && turn !== 'white') return;
     const clicked = boardState[idx];
 
     if (selIdx !== null) {
@@ -837,17 +835,17 @@ export default function App() {
       else setStatus('거긴 못 가! 초록색이나 붉은색 타겟을 눌러!');
     } else {
       if (!clicked) return;
-      if (gameMode === 'match' && clicked.color !== 'white') {
+      if (gameModeRef.current === 'match' && clicked.color !== 'white') {
         setStatus('마스터 차례니까 하얀 말만 움직여!');
         return;
       }
-      if (gameMode === 'pvp' && clicked.color !== turn) {
+      if (gameModeRef.current === 'pvp' && clicked.color !== turn) {
         setStatus(turn === 'white' ? '지금은 하얀 팀 차례야!' : '지금은 검은 팀 차례야!');
         return;
       }
       setSelIdx(idx);
       setValidMoves(getLegalMoves(idx, boardState, epSquare));
-      setStatus(gameMode === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
+      setStatus(gameModeRef.current === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
     }
   };
 
@@ -856,7 +854,7 @@ export default function App() {
     const { idx, color } = promotionData;
     setBoardState(prev => {
       const next = [...prev];
-      next[idx] = { type, color, hasMoved: true };
+      next[idx] = { ...next[idx]!, type, color, hasMoved: true };
       return next;
     });
     setPromotionData(null);
@@ -865,6 +863,7 @@ export default function App() {
 
   const startTutorial = () => {
     setGameMode('tutorial');
+    gameModeRef.current = 'tutorial';
     setGameOver(false);
     setIsAnimating(false);
     setTurn('');
@@ -877,6 +876,7 @@ export default function App() {
 
   const startMatch = (diff: string) => {
     setGameMode('match');
+    gameModeRef.current = 'match';
     setGameDiff(diff);
     setGameOver(false);
     setIsAnimating(false);
@@ -890,6 +890,7 @@ export default function App() {
 
   const startPvP = () => {
     setGameMode('pvp');
+    gameModeRef.current = 'pvp';
     setGameDiff('');
     setGameOver(false);
     setIsAnimating(false);
@@ -902,31 +903,52 @@ export default function App() {
   };
 
   const handleHomeClick = () => {
-    if (gameMode === '' || gameMode === 'menu') return;
+    if (gameModeRef.current === '' || gameModeRef.current === 'menu') return;
     setShowConfirm(true);
+  };
+
+  const restartGame = () => {
+    if (gameModeRef.current === 'tutorial') startTutorial();
+    else if (gameModeRef.current === 'match') startMatch(gameDiff);
+    else if (gameModeRef.current === 'pvp') startPvP();
+  };
+
+  const goToMenu = () => {
+    if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
+    if (animTimerRef.current) clearTimeout(animTimerRef.current);
+    if (dyingTimerRef.current) clearTimeout(dyingTimerRef.current);
+    setShowMenu(true);
+    setShowDiffOptions(false);
+    setGameOver(true);
+    setGameMode('menu');
+    gameModeRef.current = 'menu';
+    setIsAnimating(false);
+    setStatus('모드를 골라주세요!');
+    setSelIdx(null);
+    setValidMoves([]);
+    setPromotionData(null);
+    setLastMove(null);
+    setDying(null);
+    setEpSquare(null);
   };
 
   const confirmHome = (yes: boolean) => {
     setShowConfirm(false);
     if (yes) {
-      if (aiTimerRef.current) clearTimeout(aiTimerRef.current);
-      if (animTimerRef.current) clearTimeout(animTimerRef.current);
-      setShowMenu(true);
-      setShowDiffOptions(false);
-      setGameOver(true);
-      setGameMode('menu');
-      setIsAnimating(false);
-      setStatus('모드를 골라주세요!');
-      setSelIdx(null);
-      setValidMoves([]);
-      setPromotionData(null);
-      setLastMove(null);
+      goToMenu();
     }
   };
 
   return (
     <div className="container">
+      <style>{EXTRA_CSS}</style>
       <h1 className="game-title">♟ 체스마스터</h1>
+
+      {gameMode === 'pvp' && (
+        <p className="info-box pvp-top" style={{ color: turn === 'black' ? 'var(--lego-red)' : '#333' }}>
+          {turn === 'black' ? '검은 팀 차례! 멋지게 반격해봐요!' : '상대방 차례를 기다리세요!'}
+        </p>
+      )}
 
       <div className="music-controls">
         <select className="bgm-select" value={bgmId} onChange={handleBGMChange}>
@@ -964,18 +986,33 @@ export default function App() {
             const c = i % 8;
             return (
               <div
-                key={i}
-                id={`p${i}`}
-                className={`piece ${selIdx === i ? 'selected' : ''} ${capturedIdx === i ? 'being-captured' : ''}`}
+                key={d.id}
+                className={`piece ${selIdx === i ? 'selected' : ''}`}
                 data-color={d.color}
                 style={{ transform: `translate(calc(var(--sq)*${c}),calc(var(--sq)*${r}))` }}
               >
                 <div className="piece-inner">
-                  <PieceSVG type={d.type} color={d.color} />
+                  <PieceSVG type={d.type} color={d.color} uid={String(d.id)} />
                 </div>
               </div>
             );
           })}
+          {/* 잡힌 말 소멸 애니메이션 (React 상태 기반) */}
+          {dying && (
+            <div
+              key={`dying-${dying.piece.id}`}
+              className="piece being-captured"
+              data-color={dying.piece.color}
+              style={{
+                transform: `translate(calc(var(--sq)*${dying.idx % 8}),calc(var(--sq)*${Math.floor(dying.idx / 8)}))`,
+                pointerEvents: 'none'
+              }}
+            >
+              <div className="piece-inner">
+                <PieceSVG type={dying.piece.type} color={dying.piece.color} uid={`x${dying.piece.id}`} />
+              </div>
+            </div>
+          )}
 
           {showMenu && (
             <div className="menu-overlay">
@@ -984,7 +1021,7 @@ export default function App() {
                 <>
                   <button className="menu-btn" onClick={startTutorial}>1. 튜토리얼 (혼자 연습하기)</button>
                   <button className="menu-btn" onClick={() => setShowDiffOptions(true)}>2. 컴퓨터랑 대결하기</button>
-                  <button className="menu-btn" onClick={startPvP} style={{ background: '#4caf50', color: 'white', borderColor: '#388e3c' }}>3. 2인 대결 (친구랑 같이 하기)</button>
+                  <button className="menu-btn" onClick={startPvP} style={{ background: '#4caf50', color: 'white', borderColor: '#388e3c' }}>3. 2인 대결 (마주보고 같이 하기)</button>
                 </>
               ) : (
                 <div className="diff-container" style={{ display: 'flex' }}>
@@ -1001,7 +1038,9 @@ export default function App() {
         </div>
       </div>
 
-      <p className="info-box">{status}</p>
+      <p className="info-box" style={{ color: turn === 'white' && gameMode === 'pvp' ? 'var(--lego-red)' : '#333' }}>
+        {status}
+      </p>
 
       {promotionData && (
         <div className={`promo-overlay ${gameMode === 'pvp' && promotionData.color === 'black' ? 'pvp-black' : ''}`}>
@@ -1011,7 +1050,7 @@ export default function App() {
               {(['queen', 'rook', 'bishop', 'knight'] as PieceType[]).map(t => (
                 <button key={t} className="promo-btn" onClick={() => handlePromotion(t)}>
                   <div style={{ width: '100%', height: '100%' }}>
-                    <PieceSVG type={t} color={promotionData.color} />
+                    <PieceSVG type={t} color={promotionData.color} uid={`pm${t}`} />
                   </div>
                 </button>
               ))}
@@ -1032,12 +1071,15 @@ export default function App() {
         </div>
       )}
 
-      {gameOver && !showMenu && (
-        <div className="promo-overlay" onClick={() => window.location.reload()}>
+      {gameOver && !showMenu && gameMode !== 'menu' && (
+        <div className="promo-overlay">
           <div className="promo-box">
             <div className="promo-title">게임 종료!</div>
             <p style={{ marginBottom: '2vh' }}>{status}</p>
-            <button className="menu-btn" style={{ width: 'auto', padding: '1vh 4vh' }}>다시 하기</button>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '2vmin' }}>
+              <button className="menu-btn" style={{ width: 'auto', padding: '1vh 4vh' }} onClick={restartGame}>다시 하기</button>
+              <button className="menu-btn" style={{ width: 'auto', padding: '1vh 4vh', background: '#ff9800', color: 'white' }} onClick={goToMenu}>메뉴로</button>
+            </div>
           </div>
         </div>
       )}
