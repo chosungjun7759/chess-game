@@ -402,11 +402,11 @@ export default function App() {
     const c = idx % 8;
     const ok = (nr: number, nc: number) => nr >= 0 && nr < 8 && nc >= 0 && nc < 8;
 
-    const add = (nr: number, nc: number, flag: Move['flag'] = 'normal', capIdx: number | null = null) => {
+    const add = (nr: number, nc: number, flag: Move['flag'] = 'normal', iCapIdx: number | null = null) => {
       if (!ok(nr, nc)) return false;
       const t = state[nr * 8 + nc];
       if (!t) {
-        moves.push({ to: nr * 8 + nc, flag, captureIdx: capIdx });
+        moves.push({ to: nr * 8 + nc, flag, captureIdx: iCapIdx });
         return true;
       }
       if (t.color !== p.color) {
@@ -512,7 +512,7 @@ export default function App() {
     if (!p) return [];
     const pseudo = getPseudoMoves(idx, state, currentEpSq);
     const legal: Move[] = [];
-    const enemyColor = p.color === 'white' ? 'black' : 'white';
+    const enemyColor: PieceColor = p.color === 'white' ? 'black' : 'white';
 
     for (const m of pseudo) {
       const undo = applyMoveInPlace(state, { from: idx, ...m });
@@ -629,118 +629,101 @@ export default function App() {
     if (gameModeRef.current === 'menu') return;
     setEpSquare(nextEp);
 
-    const movedColor = boardState[to]!.color;
-    const nextColor = movedColor === 'white' ? 'black' : 'white';
-    const myLegalMoves = getAllLegalMoves(nextColor, boardState, epSquare);
+    const movedColor = board[to]!.color;
+    const nextColor: PieceColor = movedColor === 'white' ? 'black' : 'white';
+    const myLegalMoves = getAllLegalMoves(nextColor, board, nextEp);
 
     if (myLegalMoves.length === 0) {
       let myKingIdx = -1;
-      for (let i = 0; i < 64; i++) { if (boardState[i]?.type === 'king' && boardState[i]?.color === nextColor) { myKingIdx = i; break; } }
-      const isCheck = isSquareAttacked(myKingIdx, movedColor, boardState);
+      for (let i = 0; i < 64; i++) { if (board[i]?.type === 'king' && board[i]?.color === nextColor) { myKingIdx = i; break; } }
+      const isCheck = myKingIdx !== -1 && isSquareAttacked(myKingIdx, movedColor, board);
 
       setGameOver(true);
       if (isCheck) {
         playSound('checkmate-sound');
         let winnerText = movedColor === 'white' ? '하얀 팀' : '검은 팀';
-        if (gameModeRef.current === 'match') {
+        if (gameMode === 'match') {
           winnerText = movedColor === 'white' ? '하얀 팀(마스터)' : '검은 팀(컴퓨터)';
         }
         setStatus(`🎉 체크메이트! ${winnerText} 승리! 🎉`);
-        saveGameResultToFirebase(winnerText, gameModeRef.current, gameDiff);
+        saveGameResultToFirebase(winnerText, gameMode, gameDiff);
       } else {
         setStatus(`🤝 스테일메이트! 무승부입니다.`);
-        saveGameResultToFirebase('무승부', gameModeRef.current, gameDiff);
+        saveGameResultToFirebase('무승부', gameMode, gameDiff);
       }
       return;
     }
 
-    if (gameModeRef.current === 'match') {
+    if (gameMode === 'match') {
       if (isPlayer) {
         setTurn('black');
         setStatus('컴퓨터 로봇이 생각 중... 🤔');
       } else {
         setTurn('white');
-        setStatus('아들 차례! 멋지게 공격해봐요!');
+        setStatus('마스터 차례! 멋지게 공격해봐요!');
       }
-    } else if (gameModeRef.current === 'pvp') {
+    } else if (gameMode === 'pvp') {
       setTurn(nextColor);
       setStatus(nextColor === 'white' ? '하얀 팀 차례! 멋지게 공격해봐요!' : '검은 팀 차례! 멋지게 반격해봐요!');
     } else {
       setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
     }
-  }, [boardState, epSquare, gameDiff, getAllLegalMoves, isSquareAttacked, saveGameResultToFirebase]);
+  }, [gameMode, gameDiff, getAllLegalMoves, isSquareAttacked, saveGameResultToFirebase]);
 
+  // [핵심 수정] 다음 보드를 동기적으로 계산 → setBoardState와 afterMove가 동일한 보드를 사용
   const executeRealMove = useCallback((from: number, move: Move, isPlayer: boolean) => {
     setIsAnimating(true);
     setSelIdx(null);
     setValidMoves([]);
-
     setLastMove({ from, to: move.to });
 
     let nextEp: number | null = null;
     if (move.flag === 'pawn_double') nextEp = (from + move.to) / 2;
 
+    const mover = boardState[from]!;
+    const next = boardState.map(x => x ? { ...x } : null);
+
     if (move.captureIdx !== null) {
+      // React 상태 기반 캡처 애니메이션 (직접 DOM 조작 제거)
       setDying({ piece: boardState[move.captureIdx]!, idx: move.captureIdx });
       if (dyingTimerRef.current) clearTimeout(dyingTimerRef.current);
       dyingTimerRef.current = setTimeout(() => setDying(null), 300);
       playSound('capture-sound');
+      next[move.captureIdx] = null;
     }
 
-    setBoardState(prev => {
-      const next = [...prev];
-      if (move.captureIdx !== null) next[move.captureIdx] = null;
+    if (move.flag === 'castle_ks') {
+      next[move.to - 1] = { ...next[move.to + 1]!, hasMoved: true };
+      next[move.to + 1] = null;
+    } else if (move.flag === 'castle_qs') {
+      next[move.to + 1] = { ...next[move.to - 2]!, hasMoved: true };
+      next[move.to - 2] = null;
+    }
 
-      if (move.flag === 'castle_ks') {
-        next[move.to - 1] = next[move.to + 1];
-        next[move.to + 1] = null;
-      } else if (move.flag === 'castle_qs') {
-        next[move.to + 1] = next[move.to - 2];
-        next[move.to - 2] = null;
-      }
+    next[move.to] = { ...next[from]!, hasMoved: true };
+    next[from] = null;
 
-      next[move.to] = { ...next[from]!, hasMoved: true };
-      next[from] = null;
-      return next;
-    });
+    const isPromo = mover.type === 'pawn' && (move.to < 8 || move.to >= 56);
+    const autoPromo = isPromo && (gameMode === 'tutorial' || (!isPlayer && gameMode === 'match'));
+    if (autoPromo) next[move.to] = { ...next[move.to]!, type: 'queen' };
 
-    const checkPromo = (to: number) => {
-      const piece = boardState[from];
-      if (piece && piece.type === 'pawn' && (to < 8 || to >= 56)) {
-        if (gameModeRef.current === 'tutorial' || (!isPlayer && gameModeRef.current === 'match')) {
-          setBoardState(prev => {
-            const next = [...prev];
-            next[to] = { ...next[to]!, type: 'queen' };
-            return next;
-          });
-          animTimerRef.current = setTimeout(() => {
-            if (gameModeRef.current === 'menu') return; // Bug 5 Fix
-            setIsAnimating(false);
-            afterMove(to, isPlayer, nextEp);
-          }, 350);
-        } else {
-          animTimerRef.current = setTimeout(() => {
-            if (gameModeRef.current === 'menu') return; // Bug 5 Fix
-            setPromotionData({ idx: to, color: piece.color, from });
-            setIsAnimating(false);
-          }, 350);
-        }
+    setBoardState(next);
+
+    animTimerRef.current = setTimeout(() => {
+      if (gameModeRef.current === 'menu') return;
+      setIsAnimating(false);
+      if (isPromo && !autoPromo) {
+        setPromotionData({ idx: move.to, color: mover.color, from });
       } else {
-        animTimerRef.current = setTimeout(() => {
-          if (gameModeRef.current === 'menu') return; // Bug 5 Fix
-          setIsAnimating(false);
-          afterMove(to, isPlayer, nextEp);
-        }, 350);
+        afterMove(next, move.to, isPlayer, nextEp);
       }
-    };
-
-    checkPromo(move.to);
-  }, [boardState, afterMove]);
+    }, 350);
+  }, [boardState, gameMode, afterMove]);
 
   const bestMoveWithMinimax = useCallback((depth: number) => {
     const all = getAllLegalMoves('black', boardState, epSquare);
     if (!all.length) return null;
-    all.sort((a, b) => (b.captureIdx !== null ? (VAL[boardState[b.captureIdx!]?.type] || 0) : 0) - (a.captureIdx !== null ? (VAL[boardState[a.captureIdx!]?.type] || 0) : 0));
+    all.sort((a, b) => (b.captureIdx !== null ? (VAL[boardState[b.captureIdx]!.type] || 0) : 0) - (a.captureIdx !== null ? (VAL[boardState[a.captureIdx]!.type] || 0) : 0));
     let bestScore = -Infinity;
     let cands: (Move & { from: number })[] = [];
     for (const m of all) {
@@ -758,7 +741,7 @@ export default function App() {
   }, [boardState, epSquare, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, minimax]);
 
   const computerMove = useCallback(() => {
-    if (gameModeRef.current !== 'match' || gameOver) return;
+    if (gameMode !== 'match' || gameOver) return;
     const allMoves = getAllLegalMoves('black', boardState, epSquare);
     if (allMoves.length === 0) {
       setGameOver(true);
@@ -772,8 +755,8 @@ export default function App() {
     } else if (gameDiff === 'level2') {
       const caps = allMoves.filter(m => m.captureIdx !== null);
       if (caps.length > 0) {
-        const maxV = Math.max(...caps.map(m => VAL[boardState[m.captureIdx!]?.type] || 0));
-        const best = caps.filter(m => (VAL[boardState[m.captureIdx!]?.type] || 0) === maxV);
+        const maxV = Math.max(...caps.map(m => VAL[boardState[m.captureIdx!]!.type] || 0));
+        const best = caps.filter(m => (VAL[boardState[m.captureIdx!]!.type] || 0) === maxV);
         chosen = best[Math.floor(Math.random() * best.length)];
       } else {
         chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
@@ -787,7 +770,6 @@ export default function App() {
         const pstGain = getPST(mover, m.to) - getPST(mover, m.from);
 
         const undo = applyMoveInPlace(boardState, m);
-        // Bug 6 Fix: Use isSquareAttacked for faster danger check O(n)
         const danger = isSquareAttacked(m.to, 'white', boardState) ? myVal * 0.9 : 0;
         undoMoveInPlace(boardState, m, undo);
 
@@ -804,18 +786,18 @@ export default function App() {
 
     if (!chosen) chosen = allMoves[Math.floor(Math.random() * allMoves.length)];
     executeRealMove(chosen.from, chosen, false);
-  }, [boardState, epSquare, gameDiff, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, executeRealMove, getPST, bestMoveWithMinimax, isSquareAttacked]);
+  }, [boardState, epSquare, gameDiff, gameMode, gameOver, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, executeRealMove, getPST, bestMoveWithMinimax, isSquareAttacked]);
 
   useEffect(() => {
-    if (turn === 'black' && !gameOver && !isAnimating) {
+    if (turn === 'black' && gameMode === 'match' && !gameOver && !isAnimating) {
       aiTimerRef.current = setTimeout(computerMove, 700);
       return () => { if (aiTimerRef.current) clearTimeout(aiTimerRef.current); };
     }
-  }, [turn, gameOver, isAnimating, computerMove]);
+  }, [turn, gameMode, gameOver, isAnimating, computerMove]);
 
   const onSqClick = (idx: number) => {
     if (gameOver || isAnimating || promotionData) return;
-    if (gameModeRef.current === 'match' && turn !== 'white') return;
+    if (gameMode === 'match' && turn !== 'white') return;
     const clicked = boardState[idx];
 
     if (selIdx !== null) {
@@ -835,82 +817,79 @@ export default function App() {
       else setStatus('거긴 못 가! 초록색이나 붉은색 타겟을 눌러!');
     } else {
       if (!clicked) return;
-      if (gameModeRef.current === 'match' && clicked.color !== 'white') {
+      if (gameMode === 'match' && clicked.color !== 'white') {
         setStatus('마스터 차례니까 하얀 말만 움직여!');
         return;
       }
-      if (gameModeRef.current === 'pvp' && clicked.color !== turn) {
+      if (gameMode === 'pvp' && clicked.color !== turn) {
         setStatus(turn === 'white' ? '지금은 하얀 팀 차례야!' : '지금은 검은 팀 차례야!');
         return;
       }
       setSelIdx(idx);
       setValidMoves(getLegalMoves(idx, boardState, epSquare));
-      setStatus(gameModeRef.current === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
+      setStatus(gameMode === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
     }
   };
 
+  // [핵심 수정] 승진 반영 보드를 동기 계산 후 afterMove에 전달 → 승진 직후 체크메이트 정확 판정
   const handlePromotion = (type: PieceType) => {
     if (!promotionData) return;
-    const { idx, color } = promotionData;
-    setBoardState(prev => {
-      const next = [...prev];
-      next[idx] = { ...next[idx]!, type, color, hasMoved: true };
-      return next;
-    });
+    const { idx } = promotionData;
+    const next = boardState.map(x => x ? { ...x } : null);
+    next[idx] = { ...next[idx]!, type, hasMoved: true };
+    setBoardState(next);
     setPromotionData(null);
-    afterMove(idx, true, null);
+    afterMove(next, idx, true, null);
   };
 
   const startTutorial = () => {
     setGameMode('tutorial');
-    gameModeRef.current = 'tutorial';
     setGameOver(false);
     setIsAnimating(false);
     setTurn('');
     setEpSquare(null);
     setLastMove(null);
+    setDying(null);
     setShowMenu(false);
+    setShowDiffOptions(false);
     setBoardState(makeSetup());
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
   const startMatch = (diff: string) => {
     setGameMode('match');
-    gameModeRef.current = 'match';
     setGameDiff(diff);
     setGameOver(false);
     setIsAnimating(false);
     setTurn('white');
     setEpSquare(null);
     setLastMove(null);
+    setDying(null);
     setShowMenu(false);
+    setShowDiffOptions(false);
     setBoardState(makeSetup());
     setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
   };
 
   const startPvP = () => {
     setGameMode('pvp');
-    gameModeRef.current = 'pvp';
     setGameDiff('');
     setGameOver(false);
     setIsAnimating(false);
     setTurn('white');
     setEpSquare(null);
     setLastMove(null);
+    setDying(null);
     setShowMenu(false);
+    setShowDiffOptions(false);
     setBoardState(makeSetup());
     setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
   };
 
-  const handleHomeClick = () => {
-    if (gameModeRef.current === '' || gameModeRef.current === 'menu') return;
-    setShowConfirm(true);
-  };
-
   const restartGame = () => {
-    if (gameModeRef.current === 'tutorial') startTutorial();
-    else if (gameModeRef.current === 'match') startMatch(gameDiff);
-    else if (gameModeRef.current === 'pvp') startPvP();
+    if (gameMode === 'tutorial') startTutorial();
+    else if (gameMode === 'match') startMatch(gameDiff);
+    else if (gameMode === 'pvp') startPvP();
   };
 
   const goToMenu = () => {
@@ -921,7 +900,6 @@ export default function App() {
     setShowDiffOptions(false);
     setGameOver(true);
     setGameMode('menu');
-    gameModeRef.current = 'menu';
     setIsAnimating(false);
     setStatus('모드를 골라주세요!');
     setSelIdx(null);
@@ -932,23 +910,22 @@ export default function App() {
     setEpSquare(null);
   };
 
+  const handleHomeClick = () => {
+    if (gameMode === '' || gameMode === 'menu') return;
+    setShowConfirm(true);
+  };
+
   const confirmHome = (yes: boolean) => {
     setShowConfirm(false);
-    if (yes) {
-      goToMenu();
-    }
+    if (yes) goToMenu();
   };
+
+  const inPvP = gameMode === 'pvp' && !showMenu;
 
   return (
     <div className="container">
       <style>{EXTRA_CSS}</style>
       <h1 className="game-title">♟ 체스마스터</h1>
-
-      {gameMode === 'pvp' && (
-        <p className="info-box pvp-top" style={{ color: turn === 'black' ? 'var(--lego-red)' : '#333' }}>
-          {turn === 'black' ? '검은 팀 차례! 멋지게 반격해봐요!' : '상대방 차례를 기다리세요!'}
-        </p>
-      )}
 
       <div className="music-controls">
         <select className="bgm-select" value={bgmId} onChange={handleBGMChange}>
@@ -964,6 +941,9 @@ export default function App() {
       <audio id="capture-sound" src="https://assets.mixkit.co/active_storage/sfx/3005/3005-preview.mp3" preload="auto"></audio>
       <audio id="checkmate-sound" src="https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3" preload="auto"></audio>
       <div id="youtube-player" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}></div>
+
+      {/* PvP 대면 모드: 맞은편(검은 팀) 플레이어용 상태창 — 180도 회전 */}
+      {inPvP && <p className="info-box pvp-top">{status}</p>}
 
       <div className={`board-wrap ${gameMode === 'pvp' ? 'pvp-mode' : ''}`}>
         <div className="board">
@@ -1038,9 +1018,7 @@ export default function App() {
         </div>
       </div>
 
-      <p className="info-box" style={{ color: turn === 'white' && gameMode === 'pvp' ? 'var(--lego-red)' : '#333' }}>
-        {status}
-      </p>
+      <p className="info-box">{status}</p>
 
       {promotionData && (
         <div className={`promo-overlay ${gameMode === 'pvp' && promotionData.color === 'black' ? 'pvp-black' : ''}`}>
