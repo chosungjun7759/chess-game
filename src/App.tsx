@@ -253,6 +253,35 @@ function makeSetup(): (PieceData | null)[] {
   return [...back('black'), ...pawns('black'), ...Array(32).fill(null), ...pawns('white'), ...back('white')];
 }
 
+// 기물 부족으로 인한 무승부: K vs K, K+미약한말 vs K, 같은 색 칸 비숍끼리의 K+B vs K+B
+function isInsufficientMaterial(board: (PieceData | null)[]): boolean {
+  const pieces: PieceData[] = [];
+  const idxOf: number[] = [];
+  board.forEach((p, i) => { if (p && p.type !== 'king') { pieces.push(p); idxOf.push(i); } });
+
+  if (pieces.length === 0) return true;
+  if (pieces.length === 1 && (pieces[0].type === 'bishop' || pieces[0].type === 'knight')) return true;
+  if (
+    pieces.length === 2 &&
+    pieces[0].type === 'bishop' && pieces[1].type === 'bishop' &&
+    pieces[0].color !== pieces[1].color
+  ) {
+    const sqColor = (idx: number) => (Math.floor(idx / 8) + (idx % 8)) % 2;
+    if (sqColor(idxOf[0]) === sqColor(idxOf[1])) return true;
+  }
+  return false;
+}
+
+// 3수 동형 반복 판정을 위한 국면 지문: 기물 배치 + 다음 차례 + 앙파상 칸
+function serializePosition(board: (PieceData | null)[], turn: PieceColor, epSquare: number | null): string {
+  let s = '';
+  for (let i = 0; i < 64; i++) {
+    const p = board[i];
+    s += p ? p.color[0] + p.type[0] : '--';
+  }
+  return `${s}|${turn}|${epSquare ?? '-'}`;
+}
+
 export default function App() {
   const [boardState, setBoardState] = useState<(PieceData | null)[]>(makeSetup());
   const [selIdx, setSelIdx] = useState<number | null>(null);
@@ -272,12 +301,14 @@ export default function App() {
   const [epSquare, setEpSquare] = useState<number | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [lastMove, setLastMove] = useState<{ from: number; to: number } | null>(null);
+  const [halfmoveClock, setHalfmoveClock] = useState(0);
 
   const playerRef = useRef<any>(null);
   const aiTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dyingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gameModeRef = useRef(gameMode);
+  const positionCountsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => { gameModeRef.current = gameMode; }, [gameMode]);
 
@@ -619,15 +650,22 @@ export default function App() {
     }
   }, [evaluate, getAllLegalMoves, applyMoveInPlace, undoMoveInPlace, isSquareAttacked]);
 
-  const saveGameResultToFirebase = useCallback((winnerName: string, mode: string, difficulty: string) => {
-    // Firebase logic placeholder
-    console.log('Saving game result:', { winnerName, mode, difficulty, date: new Date().toLocaleString() });
+  const saveGameResult = useCallback((winnerName: string, mode: string, difficulty: string) => {
+    try {
+      const key = 'chessMasterResults';
+      const history = JSON.parse(localStorage.getItem(key) || '[]');
+      history.push({ winnerName, mode, difficulty, date: new Date().toISOString() });
+      localStorage.setItem(key, JSON.stringify(history.slice(-200)));
+    } catch {
+      // localStorage 사용 불가(시크릿 모드 등) — 조용히 무시
+    }
   }, []);
 
   // [핵심 수정] stale closure 제거: 항상 '이동이 반영된 보드'를 인자로 받는다
-  const afterMove = useCallback((board: (PieceData | null)[], to: number, isPlayer: boolean, nextEp: number | null) => {
+  const afterMove = useCallback((board: (PieceData | null)[], to: number, nextEp: number | null, nextHalfmove: number) => {
     if (gameModeRef.current === 'menu') return;
     setEpSquare(nextEp);
+    setHalfmoveClock(nextHalfmove);
 
     const movedColor = board[to]!.color;
     const nextColor: PieceColor = movedColor === 'white' ? 'black' : 'white';
@@ -646,16 +684,40 @@ export default function App() {
           winnerText = movedColor === 'white' ? '하얀 팀(마스터)' : '검은 팀(컴퓨터)';
         }
         setStatus(`🎉 체크메이트! ${winnerText} 승리! 🎉`);
-        saveGameResultToFirebase(winnerText, gameMode, gameDiff);
+        saveGameResult(winnerText, gameMode, gameDiff);
       } else {
         setStatus(`🤝 스테일메이트! 무승부입니다.`);
-        saveGameResultToFirebase('무승부', gameMode, gameDiff);
+        saveGameResult('무승부', gameMode, gameDiff);
       }
       return;
     }
 
+    if (isInsufficientMaterial(board)) {
+      setGameOver(true);
+      setStatus('🤝 기물이 부족해서 무승부입니다.');
+      saveGameResult('무승부', gameMode, gameDiff);
+      return;
+    }
+
+    if (nextHalfmove >= 100) {
+      setGameOver(true);
+      setStatus('🤝 50수 동안 기물을 잡거나 폰이 움직이지 않아 무승부입니다.');
+      saveGameResult('무승부', gameMode, gameDiff);
+      return;
+    }
+
+    const posKey = serializePosition(board, nextColor, nextEp);
+    const seenCount = (positionCountsRef.current.get(posKey) || 0) + 1;
+    positionCountsRef.current.set(posKey, seenCount);
+    if (seenCount >= 3) {
+      setGameOver(true);
+      setStatus('🤝 같은 상황이 3번 반복되어 무승부입니다.');
+      saveGameResult('무승부', gameMode, gameDiff);
+      return;
+    }
+
     if (gameMode === 'match') {
-      if (isPlayer) {
+      if (movedColor === 'white') {
         setTurn('black');
         setStatus('컴퓨터 로봇이 생각 중... 🤔');
       } else {
@@ -668,7 +730,7 @@ export default function App() {
     } else {
       setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
     }
-  }, [gameMode, gameDiff, getAllLegalMoves, isSquareAttacked, saveGameResultToFirebase]);
+  }, [gameMode, gameDiff, getAllLegalMoves, isSquareAttacked, saveGameResult]);
 
   // [핵심 수정] 다음 보드를 동기적으로 계산 → setBoardState와 afterMove가 동일한 보드를 사용
   const executeRealMove = useCallback((from: number, move: Move, isPlayer: boolean) => {
@@ -681,6 +743,7 @@ export default function App() {
     if (move.flag === 'pawn_double') nextEp = (from + move.to) / 2;
 
     const mover = boardState[from]!;
+    const nextHalfmove = (mover.type === 'pawn' || move.captureIdx !== null) ? 0 : halfmoveClock + 1;
     const next = boardState.map(x => x ? { ...x } : null);
 
     if (move.captureIdx !== null) {
@@ -715,10 +778,10 @@ export default function App() {
       if (isPromo && !autoPromo) {
         setPromotionData({ idx: move.to, color: mover.color, from });
       } else {
-        afterMove(next, move.to, isPlayer, nextEp);
+        afterMove(next, move.to, nextEp, nextHalfmove);
       }
     }, 350);
-  }, [boardState, gameMode, afterMove]);
+  }, [boardState, gameMode, afterMove, halfmoveClock]);
 
   const bestMoveWithMinimax = useCallback((depth: number) => {
     const all = getAllLegalMoves('black', boardState, epSquare);
@@ -839,7 +902,7 @@ export default function App() {
     next[idx] = { ...next[idx]!, type, hasMoved: true };
     setBoardState(next);
     setPromotionData(null);
-    afterMove(next, idx, true, null);
+    afterMove(next, idx, null, 0);
   };
 
   const startTutorial = () => {
@@ -853,6 +916,8 @@ export default function App() {
     setShowMenu(false);
     setShowDiffOptions(false);
     setBoardState(makeSetup());
+    setHalfmoveClock(0);
+    positionCountsRef.current = new Map();
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
@@ -868,6 +933,8 @@ export default function App() {
     setShowMenu(false);
     setShowDiffOptions(false);
     setBoardState(makeSetup());
+    setHalfmoveClock(0);
+    positionCountsRef.current = new Map();
     setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
   };
 
@@ -883,6 +950,8 @@ export default function App() {
     setShowMenu(false);
     setShowDiffOptions(false);
     setBoardState(makeSetup());
+    setHalfmoveClock(0);
+    positionCountsRef.current = new Map();
     setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
   };
 
@@ -908,6 +977,8 @@ export default function App() {
     setLastMove(null);
     setDying(null);
     setEpSquare(null);
+    setHalfmoveClock(0);
+    positionCountsRef.current = new Map();
   };
 
   const handleHomeClick = () => {
