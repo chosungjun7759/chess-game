@@ -440,7 +440,8 @@ export default function App() {
         moves.push({ to: nr * 8 + nc, flag, captureIdx: iCapIdx });
         return true;
       }
-      if (t.color !== p.color) {
+      // 킹은 잡을 수 없음 (튜토리얼처럼 차례가 자유로운 모드에서 킹이 잡히는 문제 방지)
+      if (t.color !== p.color && t.type !== 'king') {
         moves.push({ to: nr * 8 + nc, flag, captureIdx: nr * 8 + nc });
       }
       return false;
@@ -461,8 +462,10 @@ export default function App() {
       [-1, 1].forEach(dc => {
         if (ok(r + dir, c + dc)) {
           const t = state[(r + dir) * 8 + (c + dc)];
-          if (t && t.color !== p.color) moves.push({ to: (r + dir) * 8 + (c + dc), flag: 'normal', captureIdx: (r + dir) * 8 + (c + dc) });
-          else if (currentEpSq === (r + dir) * 8 + (c + dc)) moves.push({ to: currentEpSq, flag: 'ep', captureIdx: r * 8 + (c + dc) });
+          const epVictim = state[r * 8 + (c + dc)];
+          if (t && t.color !== p.color && t.type !== 'king') moves.push({ to: (r + dir) * 8 + (c + dc), flag: 'normal', captureIdx: (r + dir) * 8 + (c + dc) });
+          // 앙파상은 옆 칸에 '상대' 폰이 있을 때만 (같은 팀 폰을 잡거나 빈 칸으로 대각 이동하는 오류 방지)
+          else if (!t && currentEpSq === (r + dir) * 8 + (c + dc) && epVictim?.type === 'pawn' && epVictim.color !== p.color) moves.push({ to: currentEpSq, flag: 'ep', captureIdx: r * 8 + (c + dc) });
         }
       });
     }
@@ -917,7 +920,7 @@ export default function App() {
     setShowDiffOptions(false);
     setBoardState(makeSetup());
     setHalfmoveClock(0);
-    positionCountsRef.current = new Map();
+    positionCountsRef.current = new Map([[serializePosition(makeSetup(), 'white', null), 1]]);
     setStatus('연습 모드! 하얀 팀·검은 팀 모두 자유롭게 연습해봐!');
   };
 
@@ -934,7 +937,7 @@ export default function App() {
     setShowDiffOptions(false);
     setBoardState(makeSetup());
     setHalfmoveClock(0);
-    positionCountsRef.current = new Map();
+    positionCountsRef.current = new Map([[serializePosition(makeSetup(), 'white', null), 1]]);
     setStatus('컴퓨터 대결 시작! 마스터 차례 — 하얀 말을 먼저 움직여!');
   };
 
@@ -951,7 +954,7 @@ export default function App() {
     setShowDiffOptions(false);
     setBoardState(makeSetup());
     setHalfmoveClock(0);
-    positionCountsRef.current = new Map();
+    positionCountsRef.current = new Map([[serializePosition(makeSetup(), 'white', null), 1]]);
     setStatus('2인 대결 시작! 하얀 팀 먼저 움직이세요!');
   };
 
