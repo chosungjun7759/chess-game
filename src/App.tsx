@@ -753,8 +753,7 @@ export default function App() {
         return;
       }
       if (clicked && clicked.color === boardState[selIdx]!.color) {
-        setSelIdx(idx);
-        setValidMoves(getLegalMoves(idx, boardState, epSquare));
+        selectPiece(idx, clicked);
         return;
       }
 
@@ -771,10 +770,28 @@ export default function App() {
         setStatus(turn === 'white' ? '지금은 하얀 팀 차례야!' : '지금은 검은 팀 차례야!');
         return;
       }
-      setSelIdx(idx);
-      setValidMoves(getLegalMoves(idx, boardState, epSquare));
-      setStatus(gameMode === 'tutorial' ? DESC[clicked.color][clicked.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
+      selectPiece(idx, clicked);
     }
+  };
+
+  // 말 선택 — 갈 곳이 없으면 이유를 알려줌 (아무 반응이 없어 '말이 안 움직인다'고 느끼지 않도록)
+  const selectPiece = (idx: number, piece: PieceData) => {
+    const moves = getLegalMoves(idx, boardState, epSquare);
+    setSelIdx(idx);
+    setValidMoves(moves);
+    if (moves.length === 0) {
+      let kingIdx = -1;
+      for (let i = 0; i < 64; i++) { if (boardState[i]?.type === 'king' && boardState[i]?.color === piece.color) { kingIdx = i; break; } }
+      const inCheck = kingIdx !== -1 && isSquareAttacked(kingIdx, piece.color === 'white' ? 'black' : 'white', boardState);
+      const blockedByKing = getPseudoMoves(idx, boardState, epSquare).length > 0;
+      setStatus(inCheck
+        ? '체크! 킹이 공격받고 있어서 이 말은 못 움직여요. 킹을 지키는 수를 찾아봐!'
+        : blockedByKing
+          ? '이 말이 움직이면 킹이 위험해져서 못 움직여요. 다른 말을 눌러 봐!'
+          : '이 말은 지금 갈 수 있는 곳이 없어요. 다른 말을 눌러 봐!');
+      return;
+    }
+    setStatus(gameMode === 'tutorial' ? DESC[piece.color][piece.type] : '어디로 갈까요? (합법적인 수만 표시됨)');
   };
 
   // [핵심 수정] 승진 반영 보드를 동기 계산 후 afterMove에 전달 → 승진 직후 체크메이트 정확 판정
